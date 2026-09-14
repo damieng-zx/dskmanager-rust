@@ -88,7 +88,7 @@ dsk disk.json
 | Extended DSK | `.dsk` | Variable track sizes, SAMDisk V5 extensions |
 | MGT raw | `.mgt` | 800KB DSDD raw sector dump (SAM Coupe, DISCiPLE/+D) |
 | TRD raw | `.trd` | TR-DOS raw sector dump (ZX Spectrum Beta Disk Interface) — **experimental** |
-| TeleDisk | `.td0` | TeleDisk track/sector image, including LZHUF and legacy LZW compression |
+| TeleDisk | `.td0` | TeleDisk track/sector image, including LZHUF and legacy LZW compression; writing uses uncompressed TD0 |
 | JSON | `.json` | Human-readable, editable representation of any format |
 
 `open` and `save` detect the format from the file extension. You can open a `.dsk`, edit it, and `save` as `.json` — or vice versa. JSON files preserve all metadata (CHRN IDs, FDC status, per-sector data lengths) so the round-trip is lossless.

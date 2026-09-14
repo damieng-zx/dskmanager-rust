@@ -193,7 +193,7 @@ impl DiskImage {
         Ok(())
     }
 
-    /// Save the DSK image to a file
+    /// Save the image to a file, using JSON for `.json` paths and its native format otherwise
     pub fn save<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         if crate::io::json::is_json_file(&path) {
             crate::io::json::write_json(self, path)?;

@@ -107,7 +107,7 @@ pub fn read_td0<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
             let logical_side = sector_header[1] & 1;
             let sector_number = sector_header[2];
             let size_code = sector_header[3];
-            if size_code > 7 {
+            if size_code > 8 {
                 return Err(DskError::parse(
                     cursor.saturating_sub(6),
                     "Invalid TD0 sector size code",
@@ -662,7 +662,7 @@ fn take<'a>(data: &'a [u8], cursor: &mut usize, length: usize, what: &str) -> Re
     Ok(result)
 }
 
-fn teledisk_crc(data: &[u8]) -> u16 {
+pub(crate) fn teledisk_crc(data: &[u8]) -> u16 {
     let mut crc = 0u16;
     for &byte in data {
         crc ^= (byte as u16) << 8;

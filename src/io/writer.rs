@@ -1,11 +1,11 @@
 /// DSK file writer
-
 use crate::error::Result;
+use crate::fdc::{FdcStatus1, FdcStatus2};
 use crate::format::constants::*;
 use crate::format::DiskImageFormat;
 use crate::image::DiskImage;
 use std::fs::File;
-use std::io::{Write};
+use std::io::Write;
 use std::path::Path;
 
 /// Write a DSK file to disk
@@ -17,9 +17,7 @@ pub fn write_dsk<P: AsRef<Path>>(image: &DiskImage, path: P) -> Result<()> {
         DiskImageFormat::ExtendedDSK => write_extended_dsk(&mut file, image),
         DiskImageFormat::RawMgt => write_mgt(&mut file, image),
         DiskImageFormat::RawTrd => write_trd(&mut file, image),
-        DiskImageFormat::RawTd0 => Err(crate::error::DskError::UnsupportedFormat(
-            "Writing TD0 images is not supported".to_string(),
-        )),
+        DiskImageFormat::RawTd0 => write_td0(&mut file, image),
     }
 }
 
@@ -98,6 +96,107 @@ fn write_trd(file: &mut File, image: &DiskImage) -> Result<()> {
                 let zeros = vec![0u8; sectors_per_track * sector_size];
                 file.write_all(&zeros)?;
             }
+        }
+    }
+
+    Ok(())
+}
+
+/// Write an uncompressed TeleDisk file.
+fn write_td0(file: &mut File, image: &DiskImage) -> Result<()> {
+    let side_count = image.disks.len().clamp(1, 2) as u8;
+    let mut header = [0u8; 12];
+    header[0..2].copy_from_slice(b"TD");
+    header[4] = 0x15; // TeleDisk 2.1
+    header[5] = 0; // 250 kbps, MFM
+    header[6] = if image.spec.num_tracks > 40 { 3 } else { 1 };
+    header[7] = 0; // single-step, no comment block
+    header[8] = 0; // include all sectors
+    header[9] = side_count;
+    let header_crc = crate::io::td0_reader::teledisk_crc(&header[..10]);
+    header[10..12].copy_from_slice(&header_crc.to_le_bytes());
+    file.write_all(&header)?;
+
+    for disk in image.disks.iter().take(2) {
+        for track in disk.tracks() {
+            write_td0_track(file, track)?;
+        }
+    }
+
+    let end_marker = [0xFF, 0, 0, 0];
+    let crc = crate::io::td0_reader::teledisk_crc(&end_marker[..3]) as u8;
+    file.write_all(&[end_marker[0], end_marker[1], end_marker[2], crc])?;
+    Ok(())
+}
+
+fn write_td0_track(file: &mut File, track: &crate::image::Track) -> Result<()> {
+    if track.sector_count() > u8::MAX as usize {
+        return Err(crate::error::DskError::UnsupportedFormat(
+            "TD0 tracks cannot contain more than 255 sectors".to_string(),
+        ));
+    }
+
+    let track_header = [
+        track.sector_count() as u8,
+        track.track_number,
+        track.side_number & 1,
+        0,
+    ];
+    let track_crc = crate::io::td0_reader::teledisk_crc(&track_header[..3]) as u8;
+    file.write_all(&[track_header[0], track_header[1], track_header[2], track_crc])?;
+
+    for sector in track.sectors() {
+        if sector.id.size_code > 8 {
+            return Err(crate::error::DskError::UnsupportedFormat(
+                "TD0 sector size code must be between 0 and 8".to_string(),
+            ));
+        }
+
+        let mut flags = 0u8;
+        if sector.fdc_status1.0 & FdcStatus1::DE != 0 || sector.fdc_status2.0 & FdcStatus2::DD != 0
+        {
+            flags |= 0x02;
+        }
+        if sector.fdc_status2.0 & FdcStatus2::CM != 0 {
+            flags |= 0x04;
+        }
+
+        let sector_size = sector.advertised_size();
+        let mut data = sector.data().to_vec();
+        if data.is_empty() {
+            flags |= 0x20;
+        } else {
+            data.resize(sector_size, track.filler_byte);
+            data.truncate(sector_size);
+        }
+
+        let sector_header = [
+            sector.id.track,
+            sector.id.side & 1,
+            sector.id.sector,
+            sector.id.size_code,
+            flags,
+            0,
+        ];
+        let mut crc_data = sector_header[..5].to_vec();
+        if flags & 0x20 == 0 {
+            crc_data.extend_from_slice(&data);
+        }
+        let sector_crc = crate::io::td0_reader::teledisk_crc(&crc_data) as u8;
+        file.write_all(&[
+            sector_header[0],
+            sector_header[1],
+            sector_header[2],
+            sector_header[3],
+            sector_header[4],
+            sector_crc,
+        ])?;
+
+        if flags & 0x20 == 0 {
+            let block_size = (data.len() + 1) as u16;
+            file.write_all(&block_size.to_le_bytes())?;
+            file.write_all(&[0])?; // raw sector encoding
+            file.write_all(&data)?;
         }
     }
 
@@ -276,6 +375,7 @@ fn calculate_track_size(image: &DiskImage) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fdc::FdcStatus2;
     use crate::image::{Sector, SectorId, Track};
 
     #[test]
@@ -289,5 +389,45 @@ mod tests {
 
         let size = calculate_single_track_size(&track);
         assert_eq!(size, 256 + 9 * 512); // Track info + 9 * 512-byte sectors
+    }
+
+    #[test]
+    fn test_td0_round_trip() {
+        let mut image = DiskImage::builder()
+            .format(DiskImageFormat::RawTd0)
+            .num_sides(1)
+            .num_tracks(1)
+            .sectors_per_track(2)
+            .sector_size(512)
+            .build()
+            .unwrap();
+        let data: Vec<u8> = (0..512).map(|value| value as u8).collect();
+        image.write_sector(0, 0, 0xC1, &data).unwrap();
+        image
+            .get_disk_mut(0)
+            .unwrap()
+            .get_track_mut(0)
+            .unwrap()
+            .get_sector_mut(0xC2)
+            .unwrap()
+            .fdc_status2 = FdcStatus2::new(FdcStatus2::CM);
+
+        let path =
+            std::env::temp_dir().join(format!("dskmgr_td0_writer_{}.td0", std::process::id()));
+        write_dsk(&image, &path).unwrap();
+        let parsed = crate::io::read_td0(&path).unwrap();
+        std::fs::remove_file(path).ok();
+
+        assert_eq!(parsed.format(), DiskImageFormat::RawTd0);
+        assert_eq!(parsed.read_sector(0, 0, 0xC1).unwrap(), data.as_slice());
+        assert!(parsed
+            .get_disk(0)
+            .unwrap()
+            .get_track(0)
+            .unwrap()
+            .get_sector(0xC2)
+            .unwrap()
+            .is_deleted());
+        assert!(parsed.warnings().is_empty(), "{:?}", parsed.warnings());
     }
 }
