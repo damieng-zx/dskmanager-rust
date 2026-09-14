@@ -38,7 +38,7 @@ pub struct DiskImage {
 }
 
 impl DiskImage {
-    /// Open a DSK or MGT file from disk
+    /// Open a DSK, MGT, TRD, or TD0 file from disk
     ///
     /// Automatically detects file type based on extension:
     /// - `.mgt` files are read as raw MGT format
@@ -50,6 +50,8 @@ impl DiskImage {
             crate::io::read_trd(path)
         } else if crate::io::is_mgt_file(&path) {
             crate::io::read_mgt(path)
+        } else if crate::io::is_td0_file(&path) {
+            crate::io::read_td0(path)
         } else {
             crate::io::reader::read_dsk(path)
         }

@@ -1,6 +1,6 @@
 # DSK Manager
 
-A command-line tool and Rust library for reading, writing, and analyzing DSK, MGT, and TRD disk image files. Built for retro computing enthusiasts working with Amstrad CPC, ZX Spectrum +3, Amstrad PCW, SAM Coupe, and IBM PC floppy images.
+A command-line tool and Rust library for reading, writing, and analyzing DSK, MGT, TRD, and TD0 disk image files. Built for retro computing enthusiasts working with Amstrad CPC, ZX Spectrum +3, Amstrad PCW, SAM Coupe, and IBM PC floppy images.
 
 ## Install
 
@@ -20,6 +20,7 @@ You can also open a file directly from the command line:
 dsk disk.dsk
 dsk disk.mgt
 dsk disk.trd
+dsk disk.td0
 dsk disk.json
 ```
 
@@ -43,7 +44,7 @@ dsk disk.json
 
 | Command | Description |
 |---------|-------------|
-| `open <path>` | Open a .dsk, .mgt, .trd, or .json file |
+| `open <path>` | Open a .dsk, .mgt, .trd, .td0, or .json file |
 | `save <path>` | Save image (format determined by extension) |
 | `create [amstrad\|spectrum\|pcw]` | Create a new blank disk image |
 | `info` | Show disk information |
@@ -87,6 +88,7 @@ dsk disk.json
 | Extended DSK | `.dsk` | Variable track sizes, SAMDisk V5 extensions |
 | MGT raw | `.mgt` | 800KB DSDD raw sector dump (SAM Coupe, DISCiPLE/+D) |
 | TRD raw | `.trd` | TR-DOS raw sector dump (ZX Spectrum Beta Disk Interface) — **experimental** |
+| TeleDisk | `.td0` | TeleDisk track/sector image, including LZHUF and legacy LZW compression |
 | JSON | `.json` | Human-readable, editable representation of any format |
 
 `open` and `save` detect the format from the file extension. You can open a `.dsk`, edit it, and `save` as `.json` — or vice versa. JSON files preserve all metadata (CHRN IDs, FDC status, per-sector data lengths) so the round-trip is lossless.

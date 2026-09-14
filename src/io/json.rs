@@ -155,6 +155,7 @@ fn format_name(fmt: DiskImageFormat) -> &'static str {
         DiskImageFormat::ExtendedDSK => "ExtendedDSK",
         DiskImageFormat::RawMgt => "RawMgt",
         DiskImageFormat::RawTrd => "RawTrd",
+        DiskImageFormat::RawTd0 => "RawTd0",
     }
 }
 
@@ -164,6 +165,7 @@ fn parse_format_name(name: &str) -> std::result::Result<DiskImageFormat, String>
         "ExtendedDSK" => Ok(DiskImageFormat::ExtendedDSK),
         "RawMgt" => Ok(DiskImageFormat::RawMgt),
         "RawTrd" => Ok(DiskImageFormat::RawTrd),
+        "RawTd0" => Ok(DiskImageFormat::RawTd0),
         _ => Err(format!("Unknown format: '{}'", name)),
     }
 }
@@ -405,6 +407,7 @@ mod tests {
             DiskImageFormat::StandardDSK,
             DiskImageFormat::ExtendedDSK,
             DiskImageFormat::RawMgt,
+            DiskImageFormat::RawTd0,
         ] {
             assert_eq!(parse_format_name(format_name(fmt)).unwrap(), fmt);
         }

@@ -17,6 +17,9 @@ pub fn write_dsk<P: AsRef<Path>>(image: &DiskImage, path: P) -> Result<()> {
         DiskImageFormat::ExtendedDSK => write_extended_dsk(&mut file, image),
         DiskImageFormat::RawMgt => write_mgt(&mut file, image),
         DiskImageFormat::RawTrd => write_trd(&mut file, image),
+        DiskImageFormat::RawTd0 => Err(crate::error::DskError::UnsupportedFormat(
+            "Writing TD0 images is not supported".to_string(),
+        )),
     }
 }
 
