@@ -1,8 +1,8 @@
 //! Round-trip precision tests for JSON as an open/save format.
 //!
 //! These tests assert that converting a disk image to JSON and back loses
-//! *nothing*: `dsk > json > dsk` and `mgt > json > mgt` reproduce the original
-//! binary byte-for-byte.
+//! *nothing*: `dsk > json > dsk`, `mgt > json > mgt` and `td0 > json > td0`
+//! reproduce the original binary byte-for-byte.
 //!
 //! The oracle is deliberately strict. Rather than comparing the JSON detour
 //! against the in-memory builder output (which can hold detail a container
@@ -19,7 +19,7 @@
 //! opaque byte mismatch.
 
 use dskmanager::io::mgt_reader::MGT_FILE_SIZE;
-use dskmanager::io::{read_dsk, read_json, read_mgt, write_dsk, write_json};
+use dskmanager::io::{read_dsk, read_json, read_mgt, read_td0, write_dsk, write_json};
 use dskmanager::*;
 use std::path::PathBuf;
 
@@ -299,6 +299,112 @@ fn preset_dsk_survives_json_roundtrip() {
     assert_images_match(&from, &restored, "preset dsk>json>dsk");
 
     for p in [&src, &json] {
+        std::fs::remove_file(p).ok();
+    }
+}
+
+/// Build a TeleDisk-shaped image whose sectors exercise every condition TD0 can
+/// actually encode: a clean sector, a CRC error, a deleted address mark, and a
+/// sector with no stored data at all.
+///
+/// Sector data is 512 bytes (size code 2) and unique per (side, track, sector),
+/// so a misordered or dropped sector shows up as a byte mismatch.
+fn build_rich_td0(sides: u8, tracks: u8, sectors_per_track: u8) -> DiskImage {
+    let mut image = DiskImage::builder()
+        .format(DiskImageFormat::RawTd0)
+        .num_sides(sides)
+        .num_tracks(tracks)
+        .sectors_per_track(sectors_per_track)
+        .sector_size(512)
+        .build()
+        .expect("failed to build td0 image");
+
+    for side in 0..sides {
+        let disk = image.get_disk_mut(side).expect("missing side");
+        for t in 0..tracks {
+            let track = disk.get_track_mut(t).expect("missing track");
+
+            for (i, sector) in track.sectors_mut().iter_mut().enumerate() {
+                let seed = i
+                    .wrapping_mul(11)
+                    .wrapping_add(t as usize * 17)
+                    .wrapping_add(side as usize * 37);
+                let data: Vec<u8> = (0..512usize)
+                    .map(|k| (k.wrapping_mul(3).wrapping_add(seed) & 0xFF) as u8)
+                    .collect();
+                sector.set_data(data);
+
+                // Cycle through the four sector states TeleDisk records.
+                match (i + t as usize + side as usize) % 4 {
+                    0 => {}
+                    1 => sector.fdc_status1 = FdcStatus1::new(FdcStatus1::DE),
+                    2 => sector.fdc_status2 = FdcStatus2::new(FdcStatus2::CM),
+                    // No stored data: the writer emits the no-data flag and the
+                    // reader hands back filler plus a missing-data status.
+                    _ => sector.set_data(Vec::new()),
+                }
+            }
+        }
+    }
+
+    image
+}
+
+/// `td0 > json > td0` must be byte-identical to writing the TD0 directly.
+#[test]
+fn td0_json_td0_is_lossless() {
+    let label = "td0";
+    let image = build_rich_td0(2, 5, 9);
+
+    let src = temp_path(label, "td0");
+    let direct = temp_path(&format!("{label}_direct"), "td0");
+    let json = temp_path(label, "json");
+    let via_json = temp_path(&format!("{label}_viajson"), "td0");
+
+    // Canonical binary form, read back. `from` is what TD0 actually preserves.
+    write_dsk(&image, &src).expect("write src td0");
+    let from = read_td0(&src).expect("read src td0");
+
+    // Sanity: the reader recovered the geometry and the per-sector conditions,
+    // so the round-trip below is carrying real detail rather than blank tracks.
+    assert_eq!(from.format(), DiskImageFormat::RawTd0, "td0: format");
+    assert_eq!(from.disk_count(), 2, "td0: sides");
+    let probe = from.get_disk(0).unwrap().get_track(0).unwrap();
+    assert_eq!(probe.sector_count(), 9, "td0: sectors on side 0 track 0");
+    assert!(
+        probe.sectors().iter().any(|s| s.has_error()),
+        "td0: expected a sector carrying an FDC error"
+    );
+    assert!(
+        probe.sectors().iter().any(|s| s.is_deleted()),
+        "td0: expected a sector with a deleted address mark"
+    );
+
+    // Path A: straight binary rewrite (no JSON).
+    write_dsk(&from, &direct).expect("write direct td0");
+
+    // Path B: through JSON and back, then rewrite the binary.
+    write_json(&from, &json).expect("write json");
+    let restored = read_json(&json).expect("read json");
+    write_dsk(&restored, &via_json).expect("write via-json td0");
+
+    // Structural equality first -- precise diagnostics on failure.
+    assert_images_match(&from, &restored, "td0>json>td0");
+
+    // Then the strict byte oracle.
+    let direct_bytes = std::fs::read(&direct).expect("read direct bytes");
+    let via_json_bytes = std::fs::read(&via_json).expect("read via-json bytes");
+    assert_eq!(
+        direct_bytes.len(),
+        via_json_bytes.len(),
+        "td0: binary length differs after json round-trip"
+    );
+    assert!(
+        direct_bytes == via_json_bytes,
+        "td0: binary differs after td0>json>td0 round-trip"
+    );
+
+    for p in [&src, &direct, &json, &via_json] {
         std::fs::remove_file(p).ok();
     }
 }
