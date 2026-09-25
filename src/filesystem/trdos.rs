@@ -331,7 +331,8 @@ impl<'a> TrdosFileSystem<'a> {
         }
 
         let mut absolute_sector = entry.first_absolute_sector();
-        let max_sector = self.image.spec.num_tracks as usize * TRD_SECTORS_PER_TRACK as usize;
+        let max_sector = self.image.spec.num_tracks as usize
+            * self.image.spec.num_sides as usize * TRD_SECTORS_PER_TRACK as usize;
 
         for _ in 0..sectors_to_read {
             if absolute_sector as usize >= max_sector {
@@ -340,10 +341,12 @@ impl<'a> TrdosFileSystem<'a> {
                 continue;
             }
 
-            let track_num = (absolute_sector / TRD_SECTORS_PER_TRACK as u16) as u8;
+            let linear_track = absolute_sector / TRD_SECTORS_PER_TRACK as u16;
+            let side = (linear_track / self.image.spec.num_tracks as u16) as u8;
+            let track_num = (linear_track % self.image.spec.num_tracks as u16) as u8;
             let sector_id = (absolute_sector % TRD_SECTORS_PER_TRACK as u16) as u8 + 1;
 
-            let sector_data = self.image.read_sector(0, track_num, sector_id)?;
+            let sector_data = self.image.read_sector(side, track_num, sector_id)?;
             data.extend_from_slice(sector_data);
             absolute_sector += 1;
         }
@@ -417,7 +420,8 @@ impl<'a> FileSystem for TrdosFileSystem<'a> {
     }
 
     fn info(&self) -> FileSystemInfo {
-        let total_sectors = self.image.spec.num_tracks as usize * TRD_SECTORS_PER_TRACK as usize;
+        let total_sectors = self.image.spec.num_tracks as usize
+            * self.image.spec.num_sides as usize * TRD_SECTORS_PER_TRACK as usize;
         let free_sectors = self
             .catalog
             .as_ref()

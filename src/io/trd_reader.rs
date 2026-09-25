@@ -69,23 +69,6 @@ pub fn read_trd<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
     let num_full_tracks = file_len / track_size;
     let remainder = file_len % track_size;
 
-    let mut disk = Disk::new(0);
-    let mut offset = 0;
-
-    for track_num in 0..num_full_tracks {
-        let track_data = &data[offset..offset + track_size];
-        let track = read_trd_track(track_data, track_num as u8)?;
-        disk.add_track(track);
-        offset += track_size;
-    }
-
-    if remainder > 0 {
-        let track_num = num_full_tracks as u8;
-        let track_data = &data[offset..file_len];
-        let track = read_trd_partial_track(track_data, track_num, remainder)?;
-        disk.add_track(track);
-    }
-
     let actual_tracks = if remainder > 0 {
         num_full_tracks + 1
     } else {
@@ -102,10 +85,38 @@ pub fn read_trd<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
 
     let is_double_sided = detect_double_sided(&data, file_len, &mut warnings);
     let num_sides: u8 = if is_double_sided { 2 } else { 1 };
+    let tracks_per_side = if is_double_sided {
+        match data.get(8 * TRD_SECTOR_SIZE as usize + 227).copied() {
+            Some(0x19) if actual_tracks <= 80 => 40,
+            Some(0x16) => 80,
+            _ if actual_tracks > 80 => 80,
+            _ => actual_tracks.div_ceil(2),
+        }
+    } else {
+        actual_tracks
+    };
+    let mut disks: Vec<Disk> = (0..num_sides).map(Disk::new).collect();
+    for absolute_track in 0..actual_tracks {
+        let side = if is_double_sided { absolute_track / tracks_per_side } else { 0 };
+        if side >= disks.len() {
+            break;
+        }
+        let track_num = (absolute_track % tracks_per_side) as u8;
+        let offset = absolute_track * track_size;
+        let track = if absolute_track < num_full_tracks {
+            read_trd_track(&data[offset..offset + track_size], track_num, side as u8)?
+        } else {
+            read_trd_partial_track(&data[offset..], track_num, side as u8, remainder)?
+        };
+        disks[side].add_track(track);
+    }
+    for disk in &mut disks {
+        disk.ensure_track_count(tracks_per_side);
+    }
 
     let spec = FormatSpec {
         num_sides,
-        num_tracks: actual_tracks as u8,
+        num_tracks: tracks_per_side as u8,
         sectors_per_track: TRD_SECTORS_PER_TRACK,
         sector_size: TRD_SECTOR_SIZE,
         first_sector_id: TRD_FIRST_SECTOR_ID,
@@ -122,7 +133,7 @@ pub fn read_trd<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
     Ok(DiskImage {
         format: DiskImageFormat::RawTrd,
         spec,
-        disks: vec![disk],
+        disks,
         changed: false,
         filename,
         warnings,
@@ -144,8 +155,8 @@ fn detect_double_sided(data: &[u8], file_len: usize, _warnings: &mut Vec<String>
     file_len > trd_file_size(80)
 }
 
-fn read_trd_track(data: &[u8], track_num: u8) -> Result<Track> {
-    let mut track = Track::new(track_num, 0);
+fn read_trd_track(data: &[u8], track_num: u8, side: u8) -> Result<Track> {
+    let mut track = Track::new(track_num, side);
     track.filler_byte = 0x00;
 
     let sector_size = TRD_SECTOR_SIZE as usize;
@@ -155,7 +166,7 @@ fn read_trd_track(data: &[u8], track_num: u8) -> Result<Track> {
         let sector_data = data[offset..offset + sector_size].to_vec();
 
         let sector_id = TRD_FIRST_SECTOR_ID + sector_idx;
-        let id = SectorId::new(track_num, 0, sector_id, 1); // Size code 1 = 256 bytes
+        let id = SectorId::new(track_num, side, sector_id, 1); // Size code 1 = 256 bytes
         let sector = Sector::with_data(id, sector_data);
 
         track.add_sector(sector);
@@ -164,8 +175,8 @@ fn read_trd_track(data: &[u8], track_num: u8) -> Result<Track> {
     Ok(track)
 }
 
-fn read_trd_partial_track(data: &[u8], track_num: u8, data_len: usize) -> Result<Track> {
-    let mut track = Track::new(track_num, 0);
+fn read_trd_partial_track(data: &[u8], track_num: u8, side: u8, data_len: usize) -> Result<Track> {
+    let mut track = Track::new(track_num, side);
     track.filler_byte = 0x00;
 
     let sector_size = TRD_SECTOR_SIZE as usize;
@@ -177,7 +188,7 @@ fn read_trd_partial_track(data: &[u8], track_num: u8, data_len: usize) -> Result
         let sector_data = data[offset..offset + sector_size].to_vec();
 
         let sector_id = TRD_FIRST_SECTOR_ID + sector_idx as u8;
-        let id = SectorId::new(track_num, 0, sector_id, 1);
+        let id = SectorId::new(track_num, side, sector_id, 1);
         let sector = Sector::with_data(id, sector_data);
 
         track.add_sector(sector);
@@ -189,7 +200,7 @@ fn read_trd_partial_track(data: &[u8], track_num: u8, data_len: usize) -> Result
         sector_data[..remainder].copy_from_slice(&data[offset..data_len]);
 
         let sector_id = TRD_FIRST_SECTOR_ID + full_sectors as u8;
-        let id = SectorId::new(track_num, 0, sector_id, 1);
+        let id = SectorId::new(track_num, side, sector_id, 1);
         let sector = Sector::with_data(id, sector_data);
 
         track.add_sector(sector);
@@ -199,7 +210,7 @@ fn read_trd_partial_track(data: &[u8], track_num: u8, data_len: usize) -> Result
     let existing = full_sectors + if remainder > 0 { 1 } else { 0 };
     for sector_idx in existing..TRD_SECTORS_PER_TRACK as usize {
         let sector_id = TRD_FIRST_SECTOR_ID + sector_idx as u8;
-        let id = SectorId::new(track_num, 0, sector_id, 1);
+        let id = SectorId::new(track_num, side, sector_id, 1);
         let sector = Sector::new(id);
         track.add_sector(sector);
     }
@@ -210,6 +221,7 @@ fn read_trd_partial_track(data: &[u8], track_num: u8, data_len: usize) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filesystem::FileSystem;
 
     #[test]
     fn test_is_trd_file() {
@@ -233,5 +245,33 @@ mod tests {
             * TRD_SECTOR_SIZE as usize;
         assert_eq!(expected, 327_680);
         assert_eq!(TRD_MAX_FILE_SIZE, 655_360);
+    }
+
+    #[test]
+    fn test_double_sided_trd_roundtrip_and_file_on_side_one() {
+        let mut bytes = vec![0u8; trd_file_size(80)]; // 40 tracks on each side
+        bytes[8 * 256 + 227] = 0x19; // 40-track, double-sided catalog
+        bytes[..8].copy_from_slice(b"SIDEONE ");
+        bytes[8] = b'C';
+        bytes[9..11].copy_from_slice(&256u16.to_le_bytes());
+        bytes[13] = 1;
+        bytes[14] = 0;
+        bytes[15] = 40; // first track on side 1 in TR-DOS linear order
+        bytes[40 * 4096] = 0x66;
+
+        let src = std::env::temp_dir().join(format!("dskmgr_ds_{}.trd", std::process::id()));
+        let dst = std::env::temp_dir().join(format!("dskmgr_ds_out_{}.trd", std::process::id()));
+        std::fs::write(&src, &bytes).unwrap();
+        let image = read_trd(&src).unwrap();
+        assert_eq!(image.disk_count(), 2);
+        assert_eq!(image.spec().num_tracks, 40);
+        assert_eq!(image.read_sector(1, 0, 1).unwrap()[0], 0x66);
+        let fs = crate::filesystem::TrdosFileSystem::new(&image).unwrap();
+        assert_eq!(fs.read_file("SIDEONE").unwrap()[0], 0x66);
+        crate::io::write_dsk(&image, &dst).unwrap();
+        let output = std::fs::read(&dst).unwrap();
+        std::fs::remove_file(src).ok();
+        std::fs::remove_file(dst).ok();
+        assert_eq!(output, bytes);
     }
 }

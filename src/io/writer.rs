@@ -67,35 +67,39 @@ fn write_mgt(file: &mut File, image: &DiskImage) -> Result<()> {
 
 /// Write a raw TRD file
 fn write_trd(file: &mut File, image: &DiskImage) -> Result<()> {
-    // TRD format: single-sided, sequential tracks
-    // 80 tracks, 16 sectors per track, 256 bytes per sector
+    // TRD stores all of side 0 followed by all of side 1.
 
     let num_tracks = image.spec.num_tracks as usize;
     let sectors_per_track = 16usize;
     let sector_size = 256usize;
 
-    if let Some(disk) = image.disks.get(0) {
-        for track_num in 0..num_tracks {
-            if let Some(track) = disk.get_track(track_num as u8) {
-                for sector_id in 1..=sectors_per_track as u8 {
-                    if let Some(sector) = track.get_sector(sector_id) {
-                        let data = sector.data();
-                        if data.len() >= sector_size {
-                            file.write_all(&data[..sector_size])?;
+    for side in 0..image.spec.num_sides {
+        if let Some(disk) = image.disks.get(side as usize) {
+            for track_num in 0..num_tracks {
+                if let Some(track) = disk.get_track(track_num as u8) {
+                    for sector_id in 1..=sectors_per_track as u8 {
+                        if let Some(sector) = track.get_sector(sector_id) {
+                            let data = sector.data();
+                            if data.len() >= sector_size {
+                                file.write_all(&data[..sector_size])?;
+                            } else {
+                                file.write_all(data)?;
+                                let padding = vec![0u8; sector_size - data.len()];
+                                file.write_all(&padding)?;
+                            }
                         } else {
-                            file.write_all(data)?;
-                            let padding = vec![0u8; sector_size - data.len()];
-                            file.write_all(&padding)?;
+                            let zeros = vec![0u8; sector_size];
+                            file.write_all(&zeros)?;
                         }
-                    } else {
-                        let zeros = vec![0u8; sector_size];
-                        file.write_all(&zeros)?;
                     }
+                } else {
+                    let zeros = vec![0u8; sectors_per_track * sector_size];
+                    file.write_all(&zeros)?;
                 }
-            } else {
-                let zeros = vec![0u8; sectors_per_track * sector_size];
-                file.write_all(&zeros)?;
             }
+        } else {
+            let zeros = vec![0u8; num_tracks * sectors_per_track * sector_size];
+            file.write_all(&zeros)?;
         }
     }
 
