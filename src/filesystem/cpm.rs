@@ -335,17 +335,17 @@ impl<'a> CpmFileSystem<'a> {
     }
 
     /// Merge extents for files that span multiple directory entries
-    fn merge_extents(&self) -> HashMap<String, Vec<&CpmDirEntry>> {
+    fn merge_extents(&self) -> HashMap<(u8, String), Vec<&CpmDirEntry>> {
         Self::merge_extents_from_entries(&self.directory_entries)
     }
 
     /// Merge extents from a slice of directory entries
-    fn merge_extents_from_entries(entries: &[CpmDirEntry]) -> HashMap<String, Vec<&CpmDirEntry>> {
-        let mut files: HashMap<String, Vec<&CpmDirEntry>> = HashMap::new();
+    fn merge_extents_from_entries(entries: &[CpmDirEntry]) -> HashMap<(u8, String), Vec<&CpmDirEntry>> {
+        let mut files: HashMap<(u8, String), Vec<&CpmDirEntry>> = HashMap::new();
 
         for entry in entries {
             let filename = entry.filename_str();
-            files.entry(filename).or_default().push(entry);
+            files.entry((entry.user, filename)).or_default().push(entry);
         }
 
         // Sort extents by extent number
@@ -354,6 +354,17 @@ impl<'a> CpmFileSystem<'a> {
         }
 
         files
+    }
+
+    /// Bare names address user 0; `N:NAME.EXT` selects another CP/M user.
+    fn file_key(name: &str) -> Result<(u8, String)> {
+        if let Some((user, filename)) = name.split_once(':') {
+            let user = user.parse::<u8>().ok().filter(|&u| u <= 31)
+                .ok_or_else(|| DskError::filesystem("Invalid CP/M user number"))?;
+            Ok((user, filename.to_string()))
+        } else {
+            Ok((0, name.to_string()))
+        }
     }
 
     /// Convert a block number to a logical sector number (accounting for reserved tracks)
@@ -466,7 +477,7 @@ impl<'a> CpmFileSystem<'a> {
         let mut entries = Vec::new();
         let block_size = self.spec.block_size();
 
-        for (filename, extents) in files {
+        for ((_, filename), extents) in files {
             if extents.is_empty() {
                 continue;
             }
@@ -561,7 +572,7 @@ impl<'a> FileSystem for CpmFileSystem<'a> {
         let files = self.merge_extents();
         let mut entries = Vec::new();
 
-        for (filename, extents) in files {
+        for ((_, filename), extents) in files {
             if extents.is_empty() {
                 continue;
             }
@@ -600,7 +611,7 @@ impl<'a> FileSystem for CpmFileSystem<'a> {
         let files = self.merge_extents();
 
         let extents = files
-            .get(name)
+            .get(&Self::file_key(name)?)
             .ok_or_else(|| DskError::FileNotFound(name.to_string()))?;
 
         if extents.is_empty() {
@@ -682,14 +693,14 @@ impl CpmFileSystem<'_> {
     /// Read file binary data with optional header inclusion (CP/M only)
     /// 
     /// # Arguments
-    /// * `name` - Filename to read
+    /// * `name` - Filename to read (prefix with `N:` to select CP/M user N; defaults to user 0)
     /// * `include_header` - If true, returns raw data including AMSDOS/PLUS3DOS headers if present.
     ///                      If false, strips headers and returns only file data.
     pub fn read_file_binary(&self, name: &str, include_header: bool) -> Result<Vec<u8>> {
         let files = self.merge_extents();
 
         let extents = files
-            .get(name)
+            .get(&Self::file_key(name)?)
             .ok_or_else(|| DskError::FileNotFound(name.to_string()))?;
 
         if extents.is_empty() {
@@ -830,5 +841,41 @@ mod tests {
         let data = fs.read_file_binary("SIDE1.TXT", true).unwrap();
         assert_eq!(&data[..512], &[0x11; 512]);
         assert_eq!(&data[512..], &[0x22; 512]);
+    }
+
+    #[test]
+    fn test_identical_names_on_different_cpm_users_stay_separate() {
+        let mut image = DiskImage::builder()
+            .num_tracks(3)
+            .sectors_per_track(2)
+            .build()
+            .unwrap();
+        let mut directory = [0xE5; 512];
+        for (index, user, block) in [(0, 0, 1), (1, 1, 2)] {
+            let offset = index * 32;
+            directory[offset] = user;
+            directory[offset + 1..offset + 9].copy_from_slice(b"SAME    ");
+            directory[offset + 9..offset + 12].copy_from_slice(b"TXT");
+            directory[offset + 15] = 8;
+            directory[offset + 16] = block;
+        }
+        image.write_sector(0, 0, 0xC1, &directory).unwrap();
+        image.write_sector(0, 1, 0xC1, &[0x11; 512]).unwrap();
+        image.write_sector(0, 1, 0xC2, &[0x11; 512]).unwrap();
+        image.write_sector(0, 2, 0xC1, &[0x22; 512]).unwrap();
+        image.write_sector(0, 2, 0xC2, &[0x22; 512]).unwrap();
+
+        let mut spec = DiskSpecification::new();
+        spec.tracks_per_side = 3;
+        spec.sectors_per_track = 2;
+        spec.reserved_tracks = 0;
+        spec.directory_blocks = 1;
+        let fs = CpmFileSystem::new(&image, spec).unwrap();
+        let entries = fs.read_dir().unwrap();
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|entry| entry.user == 0 && entry.name == "SAME.TXT"));
+        assert!(entries.iter().any(|entry| entry.user == 1 && entry.name == "SAME.TXT"));
+        assert_eq!(fs.read_file_binary("SAME.TXT", true).unwrap(), vec![0x11; 1024]);
+        assert_eq!(fs.read_file_binary("1:SAME.TXT", true).unwrap(), vec![0x22; 1024]);
     }
 }

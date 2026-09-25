@@ -55,8 +55,8 @@ dsk disk.json
 | Command | Description |
 |---------|-------------|
 | `fs-list` | List files on the disk (`cat`, `dir`, `ls` also work) |
-| `fs-read <filename>` | Display file contents |
-| `fs-export <filename> [output] [raw]` | Export file to host (strips headers unless `raw`) |
+| `fs-read <filename>` | Display file contents (CP/M: prefix with `N:` for user N; default user 0) |
+| `fs-export <filename> [output] [raw]` | Export file to host (strips headers unless `raw`; CP/M user prefix supported) |
 | `fs-switch [auto\|cpm\|mgt\|trdos]` | Switch filesystem driver |
 | `fs-info` | Show filesystem details |
 
