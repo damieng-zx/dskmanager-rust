@@ -277,7 +277,10 @@ fn write_extended_dsk(file: &mut File, image: &DiskImage) -> Result<()> {
     for disk in &image.disks {
         for track in disk.tracks() {
             let track_size = calculate_single_track_size(track);
-            write_track(file, track, track_size)?;
+            // Extended DSK track lengths are recorded in 256-byte units. The
+            // next track must start at the offset advertised by the table.
+            let padded_size = (track_size + 255) / 256 * 256;
+            write_track(file, track, padded_size)?;
         }
     }
 
@@ -389,6 +392,27 @@ mod tests {
 
         let size = calculate_single_track_size(&track);
         assert_eq!(size, 256 + 9 * 512); // Track info + 9 * 512-byte sectors
+    }
+
+    #[test]
+    fn test_extended_tracks_with_128_byte_sectors_remain_aligned() {
+        let mut image = DiskImage::builder()
+            .format(DiskImageFormat::ExtendedDSK)
+            .num_tracks(2)
+            .sectors_per_track(1)
+            .sector_size(128)
+            .build()
+            .unwrap();
+        image.write_sector(0, 0, 0xC1, &[0x11; 128]).unwrap();
+        image.write_sector(0, 1, 0xC1, &[0x22; 128]).unwrap();
+
+        let path = std::env::temp_dir().join(format!("dskmgr_ext_align_{}.dsk", std::process::id()));
+        write_dsk(&image, &path).unwrap();
+        let parsed = crate::io::read_dsk(&path);
+        std::fs::remove_file(path).ok();
+        let parsed = parsed.unwrap();
+        assert_eq!(parsed.read_sector(0, 0, 0xC1).unwrap(), &[0x11; 128]);
+        assert_eq!(parsed.read_sector(0, 1, 0xC1).unwrap(), &[0x22; 128]);
     }
 
     #[test]
