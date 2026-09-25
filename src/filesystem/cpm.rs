@@ -5,7 +5,7 @@ use crate::filesystem::{
     try_parse_header, DirEntry, ExtendedDirEntry, FileAttributes, FileHeader, FileSystem,
     FileSystemInfo, HeaderType,
 };
-use crate::format::{AllocationSize, DiskSpecification};
+use crate::format::{AllocationSize, DiskSpecSide, DiskSpecification};
 use crate::image::DiskImage;
 use std::collections::HashMap;
 
@@ -292,35 +292,46 @@ impl<'a> CpmFileSystem<'a> {
         // Directory starts at the first sector of the first track after reserved tracks
         let start_track = spec.reserved_tracks;
 
-        // Read sectors in logical order (by sector ID) starting from reserved_tracks
-        let disk = image.get_disk(0).ok_or_else(|| DskError::filesystem("No disk side 0"))?;
-
-        let mut bytes_read = 0;
-        for track_num in start_track..spec.tracks_per_side {
-            let track = match disk.get_track(track_num) {
-                Some(t) => t,
-                None => continue,
-            };
-
-            // Get sectors sorted by ID (logical order)
-            let mut sector_ids: Vec<u8> = track.sectors().iter().map(|s| s.id.sector).collect();
-            sector_ids.sort();
-
-            for sector_id in sector_ids {
-                if let Some(sector) = track.get_sector(sector_id) {
-                    let data = sector.data();
-                    let to_copy = (dir_size_bytes - bytes_read).min(data.len());
-                    dir_data.extend_from_slice(&data[..to_copy]);
-                    bytes_read += to_copy;
-
-                    if bytes_read >= dir_size_bytes {
-                        return Ok(dir_data);
-                    }
+        let total_tracks = spec.tracks_per_side as usize * spec.side_count() as usize;
+        let first_sector = start_track as usize * spec.sectors_per_track as usize;
+        let last_sector = total_tracks * spec.sectors_per_track as usize;
+        for absolute_sector in first_sector..last_sector {
+            if let Some(data) = Self::logical_sector(image, spec, absolute_sector) {
+                let to_copy = (dir_size_bytes - dir_data.len()).min(data.len());
+                dir_data.extend_from_slice(&data[..to_copy]);
+                if dir_data.len() >= dir_size_bytes {
+                    break;
                 }
             }
         }
 
         Ok(dir_data)
+    }
+
+    /// Map a CP/M logical sector onto its physical side, track, and sector ID.
+    fn logical_sector<'b>(image: &'b DiskImage, spec: &DiskSpecification, absolute: usize) -> Option<&'b [u8]> {
+        let sectors_per_track = spec.sectors_per_track as usize;
+        let tracks_per_side = spec.tracks_per_side as usize;
+        if sectors_per_track == 0 || tracks_per_side == 0 {
+            return None;
+        }
+        let logical_track = absolute / sectors_per_track;
+        let sector_index = absolute % sectors_per_track;
+        let (side, track) = match spec.side {
+            DiskSpecSide::Single => (0, logical_track),
+            DiskSpecSide::DoubleAlternate => (logical_track % 2, logical_track / 2),
+            DiskSpecSide::DoubleSuccessive => (logical_track / tracks_per_side, logical_track % tracks_per_side),
+            DiskSpecSide::DoubleReverse => {
+                let side = logical_track / tracks_per_side;
+                let track = logical_track % tracks_per_side;
+                (side, if side == 1 { tracks_per_side - 1 - track } else { track })
+            }
+            DiskSpecSide::Invalid => return None,
+        };
+        let physical_track = image.get_disk(side as u8)?.get_track(track as u8)?;
+        let mut sectors: Vec<_> = physical_track.sectors().iter().collect();
+        sectors.sort_by_key(|sector| sector.id.sector);
+        Some(sectors.get(sector_index)?.data())
     }
 
     /// Merge extents for files that span multiple directory entries
@@ -364,14 +375,8 @@ impl<'a> CpmFileSystem<'a> {
         let block_size = self.spec.block_size();
         let sector_size = self.spec.sector_size as usize;
         let sectors_per_block = block_size / sector_size;
-        let sectors_per_track = self.spec.sectors_per_track as usize;
 
         let mut data = Vec::new();
-
-        let disk = self
-            .image
-            .get_disk(0)
-            .ok_or_else(|| DskError::filesystem("No disk side 0"))?;
 
         for &block_num in blocks {
             if block_num == 0 {
@@ -384,29 +389,9 @@ impl<'a> CpmFileSystem<'a> {
             // Read all sectors for this block
             for i in 0..sectors_per_block {
                 let absolute_sector = start_sector + i;
-                let track_num = absolute_sector / sectors_per_track;
-                let sector_in_track = absolute_sector % sectors_per_track;
-
-                if let Some(track) = disk.get_track(track_num as u8) {
-                    // Get sectors sorted by ID and pick the nth one
-                    let mut sector_ids: Vec<u8> =
-                        track.sectors().iter().map(|s| s.id.sector).collect();
-                    sector_ids.sort();
-
-                    if sector_in_track < sector_ids.len() {
-                        let sector_id = sector_ids[sector_in_track];
-                        if let Some(sector) = track.get_sector(sector_id) {
-                            data.extend_from_slice(sector.data());
-                        } else {
-                            // Sector not found, pad with zeros
-                            data.extend(std::iter::repeat(0).take(sector_size));
-                        }
-                    } else {
-                        // Not enough sectors, pad with zeros
-                        data.extend(std::iter::repeat(0).take(sector_size));
-                    }
+                if let Some(sector_data) = Self::logical_sector(self.image, &self.spec, absolute_sector) {
+                    data.extend_from_slice(sector_data);
                 } else {
-                    // Track not found, pad with zeros
                     data.extend(std::iter::repeat(0).take(sector_size));
                 }
             }
@@ -815,5 +800,35 @@ mod tests {
         assert_eq!(entry.index, 10);
         // Extent number = (high << 5) | (low & 0x1F) = (1 << 5) | 3 = 35
         assert_eq!(entry.extent_number(), 35);
+    }
+
+    #[test]
+    fn test_read_file_on_second_side_of_alternate_disk() {
+        let mut image = DiskImage::builder()
+            .num_sides(2)
+            .num_tracks(2)
+            .sectors_per_track(2)
+            .build()
+            .unwrap();
+        let mut directory = [0xE5; 512];
+        directory[0] = 0;
+        directory[1..9].copy_from_slice(b"SIDE1   ");
+        directory[9..12].copy_from_slice(b"TXT");
+        directory[15] = 8; // 1024 bytes in block 1
+        directory[16] = 1;
+        image.write_sector(0, 0, 0xC1, &directory).unwrap();
+        image.write_sector(1, 0, 0xC1, &[0x11; 512]).unwrap();
+        image.write_sector(1, 0, 0xC2, &[0x22; 512]).unwrap();
+
+        let mut spec = DiskSpecification::new();
+        spec.side = DiskSpecSide::DoubleAlternate;
+        spec.tracks_per_side = 2;
+        spec.sectors_per_track = 2;
+        spec.reserved_tracks = 0;
+        spec.directory_blocks = 1;
+        let fs = CpmFileSystem::new(&image, spec).unwrap();
+        let data = fs.read_file_binary("SIDE1.TXT", true).unwrap();
+        assert_eq!(&data[..512], &[0x11; 512]);
+        assert_eq!(&data[512..], &[0x22; 512]);
     }
 }
