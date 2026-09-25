@@ -193,15 +193,64 @@ impl DiskImage {
         Ok(())
     }
 
-    /// Save the image to a file, using JSON for `.json` paths and its native format otherwise
+    /// Save the image, selecting the output format from a recognized file extension.
     pub fn save<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
         if crate::io::json::is_json_file(&path) {
             crate::io::json::write_json(self, path)?;
         } else {
-            crate::io::writer::write_dsk(self, path)?;
+            let extension = path.as_ref().extension().and_then(|e| e.to_str()).unwrap_or("");
+            let output_format = if extension.eq_ignore_ascii_case("mgt") {
+                self.validate_raw_geometry(2, 80, 10, 512)?;
+                DiskImageFormat::RawMgt
+            } else if extension.eq_ignore_ascii_case("trd") {
+                if self.spec.num_tracks == 0 || self.spec.num_tracks > 80 {
+                    return Err(DskError::invalid_format("TRD requires 1 to 80 tracks per side"));
+                }
+                self.validate_raw_geometry(self.spec.num_sides, self.spec.num_tracks, 16, 256)?;
+                DiskImageFormat::RawTrd
+            } else if extension.eq_ignore_ascii_case("td0") {
+                if self.disks.is_empty() || self.disks.len() > 2 {
+                    return Err(DskError::invalid_format("TD0 requires one or two sides"));
+                }
+                DiskImageFormat::RawTd0
+            } else if extension.eq_ignore_ascii_case("dsk") {
+                match self.format {
+                    DiskImageFormat::StandardDSK | DiskImageFormat::ExtendedDSK => self.format,
+                    _ => DiskImageFormat::ExtendedDSK,
+                }
+            } else {
+                self.format
+            };
+
+            let mut output = self.clone();
+            output.format = output_format;
+            crate::io::writer::write_dsk(&output, path)?;
+            self.format = output_format;
         }
         self.changed = false;
         Ok(())
+    }
+
+    fn validate_raw_geometry(&self, sides: u8, tracks: u8, sectors: u8, size: usize) -> Result<()> {
+        let valid = self.disks.len() == sides as usize
+            && self.spec.num_sides == sides
+            && self.spec.num_tracks == tracks
+            && self.disks.iter().all(|disk| {
+                disk.track_count() == tracks as usize
+                    && disk.tracks().iter().all(|track| {
+                        track.sector_count() == sectors as usize
+                            && (1..=sectors).all(|id| {
+                                track.get_sector(id)
+                                    .map(|sector| sector.data().len() == size && sector.advertised_size() == size)
+                                    .unwrap_or(false)
+                            })
+                    })
+            });
+        if valid {
+            Ok(())
+        } else {
+            Err(DskError::invalid_format("Image geometry cannot be represented in the requested raw format"))
+        }
     }
 
     /// Check if the image has been modified
@@ -375,5 +424,28 @@ mod tests {
 
         assert_eq!(image.total_capacity(), 2 * 40 * 9 * 512);
         assert_eq!(image.total_capacity() / 1024, 360);
+    }
+
+    #[test]
+    fn test_save_uses_requested_extension() {
+        let mut image = DiskImage::builder()
+            .num_tracks(2)
+            .sectors_per_track(1)
+            .build()
+            .unwrap();
+        let path = std::env::temp_dir().join(format!("dskmgr_convert_{}.td0", std::process::id()));
+        image.save(&path).unwrap();
+        let result = DiskImage::open(&path);
+        std::fs::remove_file(path).ok();
+        assert_eq!(image.format(), DiskImageFormat::RawTd0);
+        assert_eq!(result.unwrap().format(), DiskImageFormat::RawTd0);
+    }
+
+    #[test]
+    fn test_save_rejects_lossy_raw_geometry() {
+        let mut image = DiskImage::create(FormatSpec::amstrad_data()).unwrap();
+        let path = std::env::temp_dir().join(format!("dskmgr_invalid_{}.mgt", std::process::id()));
+        assert!(image.save(&path).is_err());
+        assert!(!path.exists());
     }
 }
