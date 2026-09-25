@@ -822,6 +822,7 @@ mod tests {
             .build()
             .unwrap();
         let mut directory = [0xE5; 512];
+        directory[..32].fill(0);
         directory[0] = 0;
         directory[1..9].copy_from_slice(b"SIDE1   ");
         directory[9..12].copy_from_slice(b"TXT");
@@ -853,6 +854,7 @@ mod tests {
         let mut directory = [0xE5; 512];
         for (index, user, block) in [(0, 0, 1), (1, 1, 2)] {
             let offset = index * 32;
+            directory[offset..offset + 32].fill(0);
             directory[offset] = user;
             directory[offset + 1..offset + 9].copy_from_slice(b"SAME    ");
             directory[offset + 9..offset + 12].copy_from_slice(b"TXT");
