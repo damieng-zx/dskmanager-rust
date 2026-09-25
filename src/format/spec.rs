@@ -66,7 +66,7 @@ impl FormatSpec {
             num_tracks: 40,
             sectors_per_track: 9,
             sector_size: 512,
-            first_sector_id: 0xC1,
+            first_sector_id: 0x41,
             gap3_length: 0x4E,
             filler_byte: 0xE5,
             interleave: 1,
@@ -252,6 +252,10 @@ mod tests {
         let spec = FormatSpec::amstrad_system();
         assert_eq!(spec.total_capacity(), 40 * 9 * 512);
         assert_eq!(spec.total_capacity() / 1024, 180);
+        assert_eq!(spec.first_sector_id, 0x41);
+        let image = crate::image::DiskImage::create(spec).unwrap();
+        assert!(image.read_sector(0, 0, 0x41).is_ok());
+        assert!(crate::format::DiskSpecification::identify(&image).format.contains("system"));
     }
 
     #[test]
