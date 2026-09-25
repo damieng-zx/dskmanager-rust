@@ -230,10 +230,12 @@ fn write_standard_dsk(file: &mut File, image: &DiskImage) -> Result<()> {
 
     file.write_all(&disk_info)?;
 
-    // Write tracks for each side
-    for disk in &image.disks {
-        for track in disk.tracks() {
-            write_track(file, track, track_size)?;
+    // DSK records alternate sides within each cylinder.
+    for track_num in 0..image.spec.num_tracks {
+        for disk in &image.disks {
+            if let Some(track) = disk.get_track(track_num) {
+                write_track(file, track, track_size)?;
+            }
         }
     }
 
@@ -259,28 +261,32 @@ fn write_extended_dsk(file: &mut File, image: &DiskImage) -> Result<()> {
 
     // Set per-track sizes (in 256-byte units)
     let mut track_index = 0;
-    for disk in &image.disks {
-        for track in disk.tracks() {
-            let track_size = calculate_single_track_size(track);
-            let size_units = ((track_size + 255) / 256) as u8; // Round up
-            let offset = DISK_INFO_EXT_TRACK_SIZE_OFFSET + track_index;
-            if offset < disk_info.len() {
-                disk_info[offset] = size_units;
+    for track_num in 0..image.spec.num_tracks {
+        for disk in &image.disks {
+            if let Some(track) = disk.get_track(track_num) {
+                let track_size = calculate_single_track_size(track);
+                let size_units = ((track_size + 255) / 256) as u8; // Round up
+                let offset = DISK_INFO_EXT_TRACK_SIZE_OFFSET + track_index;
+                if offset < disk_info.len() {
+                    disk_info[offset] = size_units;
+                }
+                track_index += 1;
             }
-            track_index += 1;
         }
     }
 
     file.write_all(&disk_info)?;
 
-    // Write tracks for each side
-    for disk in &image.disks {
-        for track in disk.tracks() {
-            let track_size = calculate_single_track_size(track);
-            // Extended DSK track lengths are recorded in 256-byte units. The
-            // next track must start at the offset advertised by the table.
-            let padded_size = (track_size + 255) / 256 * 256;
-            write_track(file, track, padded_size)?;
+    // Write tracks in the same order as the size table.
+    for track_num in 0..image.spec.num_tracks {
+        for disk in &image.disks {
+            if let Some(track) = disk.get_track(track_num) {
+                let track_size = calculate_single_track_size(track);
+                // Extended DSK track lengths are recorded in 256-byte units. The
+                // next track must start at the offset advertised by the table.
+                let padded_size = (track_size + 255) / 256 * 256;
+                write_track(file, track, padded_size)?;
+            }
         }
     }
 
@@ -413,6 +419,39 @@ mod tests {
         let parsed = parsed.unwrap();
         assert_eq!(parsed.read_sector(0, 0, 0xC1).unwrap(), &[0x11; 128]);
         assert_eq!(parsed.read_sector(0, 1, 0xC1).unwrap(), &[0x22; 128]);
+    }
+
+    #[test]
+    fn test_two_sided_dsk_track_order() {
+        for format in [DiskImageFormat::StandardDSK, DiskImageFormat::ExtendedDSK] {
+            let mut image = DiskImage::builder()
+                .format(format)
+                .num_sides(2)
+                .num_tracks(2)
+                .sectors_per_track(1)
+                .build()
+                .unwrap();
+            for track in 0..2 {
+                for side in 0..2 {
+                    image.write_sector(side, track, 0xC1, &[track * 2 + side; 512]).unwrap();
+                }
+            }
+            let path = std::env::temp_dir().join(format!("dskmgr_order_{:?}_{}.dsk", format, std::process::id()));
+            write_dsk(&image, &path).unwrap();
+            let bytes = std::fs::read(&path).unwrap();
+            let parsed = crate::io::read_dsk(&path);
+            std::fs::remove_file(path).ok();
+            // Each 256-byte track header is followed by one 512-byte sector.
+            for track in 0..2 {
+                for side in 0..2 {
+                    let offset = 256 + (track * 2 + side) as usize * 768;
+                    assert_eq!(&bytes[offset..offset + 10], b"Track-Info");
+                    assert_eq!((bytes[offset + 0x10], bytes[offset + 0x11]), (track, side));
+                    assert_eq!(bytes[offset + 256], track * 2 + side);
+                    assert_eq!(parsed.as_ref().unwrap().read_sector(side, track, 0xC1).unwrap(), &[track * 2 + side; 512]);
+                }
+            }
+        }
     }
 
     #[test]

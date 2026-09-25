@@ -114,18 +114,14 @@ fn read_standard_dsk(
         disk_info[DISK_INFO_TRACK_SIZE_OFFSET + 1],
     ]) as usize;
 
-    let mut disks = Vec::with_capacity(num_sides as usize);
+    let mut disks: Vec<Disk> = (0..num_sides).map(Disk::new).collect();
 
-    // Read tracks for each side
-    for side in 0..num_sides {
-        let mut disk = Disk::new(side);
-
-        for track_num in 0..num_tracks {
+    // DSK records alternate sides within each cylinder.
+    for track_num in 0..num_tracks {
+        for side in 0..num_sides {
             let track = read_track(&mut file, track_num, side, track_size, warnings)?;
-            disk.add_track(track);
+            disks[side as usize].add_track(track);
         }
-
-        disks.push(disk);
     }
 
     // Create format spec based on first track
@@ -164,15 +160,13 @@ fn read_extended_dsk(
         }
     }
 
-    let mut disks = Vec::with_capacity(num_sides as usize);
+    let mut disks: Vec<Disk> = (0..num_sides).map(Disk::new).collect();
     let mut recovered_tracks = 0usize;
 
-    // Read tracks for each side
+    // The size table and the track data both alternate sides per cylinder.
     let mut track_index = 0;
-    for side in 0..num_sides {
-        let mut disk = Disk::new(side);
-
-        for track_num in 0..num_tracks {
+    for track_num in 0..num_tracks {
+        for side in 0..num_sides {
             let track_size = track_sizes[track_index];
             track_index += 1;
 
@@ -184,21 +178,19 @@ fn read_extended_dsk(
                 match recover_extended_track_size(&mut file, track_num, side)? {
                     Some(recovered) => {
                         let track = read_track(&mut file, track_num, side, recovered, warnings)?;
-                        disk.add_track(track);
+                        disks[side as usize].add_track(track);
                         recovered_tracks += 1;
                     }
                     None => {
                         // Genuinely unformatted track - create empty track
-                        disk.add_track(Track::new(track_num, side));
+                        disks[side as usize].add_track(Track::new(track_num, side));
                     }
                 }
             } else {
                 let track = read_track(&mut file, track_num, side, track_size, warnings)?;
-                disk.add_track(track);
+                disks[side as usize].add_track(track);
             }
         }
-
-        disks.push(disk);
     }
 
     // Create format spec
