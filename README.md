@@ -70,6 +70,9 @@ dsk disk.json
 | `tracks` | List all tracks |
 | `sectors` | List all sectors |
 | `read-sector <side> <track> <sector>` | Dump a sector (sector ID can be hex like `0xC1`) |
+| `write-sector <side> <track> <sector> <path>` | Replace a sector with a same-size host file |
+| `fill-sector <side> <track> <sector> <byte>` | Fill a sector with a byte (decimal or `0xNN`) |
+| `set-sector-status <side> <track> <sector> <st1> <st2>` | Edit FDC status bytes (decimal or `0xNN`) |
 
 **Analysis**
 

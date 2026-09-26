@@ -34,6 +34,9 @@ impl CommandCompleter {
                 "tracks",
                 "sectors",
                 "read-sector",
+                "write-sector",
+                "fill-sector",
+                "set-sector-status",
                 "fs-switch",
                 "fs-list",
                 "cat",
@@ -663,6 +666,60 @@ fn main() {
                     println!("No image loaded.");
                 }
             }
+            "write-sector" => {
+                if let Some(ref mut img) = image {
+                    if parts.len() != 5 {
+                        println!("Usage: write-sector <side> <track> <sector_id> <host_path>");
+                        continue;
+                    }
+                    match parse_sector_address(&parts).and_then(|(side, track, id)| {
+                        replace_sector_from_file(img, side, track, id, &parts[4]).map_err(|e| e.to_string())
+                    }) {
+                        Ok(size) => println!("Wrote {} bytes to sector.", size),
+                        Err(e) => println!("Error: {}", e),
+                    }
+                } else {
+                    println!("No image loaded.");
+                }
+            }
+            "fill-sector" => {
+                if let Some(ref mut img) = image {
+                    if parts.len() != 5 {
+                        println!("Usage: fill-sector <side> <track> <sector_id> <byte>");
+                        continue;
+                    }
+                    let result = parse_sector_address(&parts).and_then(|(side, track, id)| {
+                        let byte = parse_hex_or_dec(&parts[4]).ok_or("Invalid byte (use decimal or 0xNN)")?;
+                        let len = img.read_sector(side, track, id).map_err(|e| e.to_string())?.len();
+                        img.write_sector(side, track, id, &vec![byte; len]).map_err(|e| e.to_string())
+                    });
+                    match result {
+                        Ok(()) => println!("Sector filled."),
+                        Err(e) => println!("Error: {}", e),
+                    }
+                } else {
+                    println!("No image loaded.");
+                }
+            }
+            "set-sector-status" => {
+                if let Some(ref mut img) = image {
+                    if parts.len() != 6 {
+                        println!("Usage: set-sector-status <side> <track> <sector_id> <st1> <st2>");
+                        continue;
+                    }
+                    let result = parse_sector_address(&parts).and_then(|(side, track, id)| {
+                        let st1 = parse_hex_or_dec(&parts[4]).ok_or("Invalid ST1 byte")?;
+                        let st2 = parse_hex_or_dec(&parts[5]).ok_or("Invalid ST2 byte")?;
+                        set_sector_status(img, side, track, id, st1, st2).map_err(|e| e.to_string())
+                    });
+                    match result {
+                        Ok(()) => println!("FDC status updated."),
+                        Err(e) => println!("Error: {}", e),
+                    }
+                } else {
+                    println!("No image loaded.");
+                }
+            }
             "fs-import" => {
                 if let Some(ref mut img) = image {
                     if parts.len() < 2 {
@@ -959,6 +1016,9 @@ fn print_help() {
     println!("  tracks                         - List all tracks");
     println!("  sectors [track] [side]         - List sectors (all or specific track/side)");
     println!("  read-sector <s> <t> <id>       - Read and display a sector");
+    println!("  write-sector <s> <t> <id> <path> - Replace sector data from a same-size host file");
+    println!("  fill-sector <s> <t> <id> <byte> - Fill a sector with a decimal or 0xNN byte");
+    println!("  set-sector-status <s> <t> <id> <st1> <st2> - Set FDC status bytes (decimal or 0xNN)");
     println!();
     println!("Filesystem:");
     println!("  fs-switch [auto|cpm|mgt|trdos]  - Show or set filesystem type (auto detects from image format)");
@@ -1171,6 +1231,34 @@ fn parse_hex_or_dec(s: &str) -> Option<u8> {
     }
 }
 
+fn parse_sector_address(parts: &[String]) -> std::result::Result<(u8, u8, u8), String> {
+    let parse = |index: usize| {
+        parts.get(index).and_then(|value| parse_hex_or_dec(value))
+            .ok_or_else(|| format!("Invalid side/track/sector number: {}", parts.get(index).map(String::as_str).unwrap_or("")))
+    };
+    Ok((parse(1)?, parse(2)?, parse(3)?))
+}
+
+fn replace_sector_from_file(image: &mut DiskImage, side: u8, track: u8, id: u8, path: &str) -> Result<usize> {
+    let expected = image.read_sector(side, track, id)?.len();
+    let data = std::fs::read(path)?;
+    if data.len() != expected {
+        return Err(DskError::filesystem(format!(
+            "Sector has {} bytes but file has {}; use a same-size file", expected, data.len()
+        )));
+    }
+    image.write_sector(side, track, id, &data)?;
+    Ok(data.len())
+}
+
+fn set_sector_status(image: &mut DiskImage, side: u8, track: u8, id: u8, st1: u8, st2: u8) -> Result<()> {
+    image.read_sector(side, track, id)?;
+    let sector = image.get_disk_mut(side).unwrap().get_track_mut(track).unwrap().get_sector_mut(id).unwrap();
+    sector.fdc_status1 = FdcStatus1::new(st1);
+    sector.fdc_status2 = FdcStatus2::new(st2);
+    Ok(())
+}
+
 fn find_lowest_sector_id(image: &DiskImage, side: u8, track: u8) -> Option<u8> {
     let disk = image.disks().get(side as usize)?;
     let track_data = disk.get_track(track)?;
@@ -1372,6 +1460,41 @@ fn find_strings_in_track(
                 text: current_string,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod sector_edit_tests {
+    use super::*;
+
+    #[test]
+    fn sector_data_and_status_survive_save() {
+        let mut image = DiskImage::builder().num_tracks(1).sectors_per_track(1).build().unwrap();
+        let host = std::env::temp_dir().join(format!("dskmgr_sector_{}.bin", std::process::id()));
+        let disk = std::env::temp_dir().join(format!("dskmgr_sector_{}.dsk", std::process::id()));
+        std::fs::write(&host, [0x99; 512]).unwrap();
+        replace_sector_from_file(&mut image, 0, 0, 0xC1, host.to_str().unwrap()).unwrap();
+        set_sector_status(&mut image, 0, 0, 0xC1, 0x20, 0x40).unwrap();
+        image.save(&disk).unwrap();
+        let loaded = DiskImage::open(&disk).unwrap();
+        std::fs::remove_file(host).ok();
+        std::fs::remove_file(disk).ok();
+        assert_eq!(loaded.read_sector(0, 0, 0xC1).unwrap(), &[0x99; 512]);
+        let sector = loaded.get_disk(0).unwrap().get_track(0).unwrap().get_sector(0xC1).unwrap();
+        assert_eq!(sector.fdc_status1.0, 0x20);
+        assert_eq!(sector.fdc_status2.0, 0x40);
+    }
+
+    #[test]
+    fn wrong_size_does_not_modify_sector() {
+        let mut image = DiskImage::builder().num_tracks(1).sectors_per_track(1).build().unwrap();
+        let host = std::env::temp_dir().join(format!("dskmgr_short_{}.bin", std::process::id()));
+        std::fs::write(&host, [1, 2, 3]).unwrap();
+        assert!(replace_sector_from_file(&mut image, 0, 0, 0xC1, host.to_str().unwrap()).is_err());
+        std::fs::remove_file(host).ok();
+        assert!(image.read_sector(0, 0, 0xC1).unwrap().iter().all(|&b| b == 0xE5));
+        assert_eq!(parse_hex_or_dec("0xC1"), Some(0xC1));
+        assert!(parse_sector_address(&["x".into(), "0".into(), "oops".into(), "0xC1".into()]).is_err());
     }
 }
 
