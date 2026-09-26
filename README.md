@@ -57,6 +57,8 @@ dsk disk.json
 | `fs-list` | List files on the disk (`cat`, `dir`, `ls` also work) |
 | `fs-read <filename>` | Display file contents (CP/M: prefix with `N:` for user N; default user 0) |
 | `fs-export <filename> [output] [raw]` | Export file to host (strips headers unless `raw`; CP/M user prefix supported) |
+| `fs-import <host_path> [disk_name]` | Import a file (CP/M 8.3, MGT 10-character, TR-DOS 8-character + type `.C`/`.B`/`.D`/`.#`) |
+| `fs-delete <disk_name>` | Delete a file and release its allocation |
 | `fs-switch [auto\|cpm\|mgt\|trdos]` | Switch filesystem driver |
 | `fs-info` | Show filesystem details |
 
@@ -107,9 +109,9 @@ Built-in configurations for common formats:
 
 ### Filesystems
 
-- **CP/M** — read-only support for Amstrad CPC, Spectrum +3, PCW, and Tatung Einstein
-- **MGT** — read-only support for DISCiPLE/+D and SAM Coupe (SAMDOS, MasterDOS, BDOS)
-- **TR-DOS** — *experimental* read-only support for the ZX Spectrum Beta Disk Interface (directory listing and file extraction; writing not yet implemented)
+- **CP/M** — read, import, and delete files on Amstrad CPC, Spectrum +3, PCW, and Tatung Einstein images
+- **MGT** — read, import, and delete files on DISCiPLE/+D and SAM Coupe images
+- **TR-DOS** — *experimental* read, import, and delete files on ZX Spectrum Beta Disk Interface images
 
 ### Copy protection detection
 

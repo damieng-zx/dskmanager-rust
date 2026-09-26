@@ -42,6 +42,8 @@ impl CommandCompleter {
                 "fs-read",
                 "fs-show",
                 "fs-export",
+                "fs-import",
+                "fs-delete",
                 "fs-info",
                 "protection",
                 "disassemble",
@@ -653,6 +655,40 @@ fn main() {
                     println!("No image loaded.");
                 }
             }
+            "fs-import" => {
+                if let Some(ref mut img) = image {
+                    if parts.len() < 2 {
+                        println!("Usage: fs-import <host_path> [disk_name]");
+                        continue;
+                    }
+                    let name = parts.get(2).cloned().or_else(|| std::path::Path::new(&parts[1])
+                        .file_name().map(|n| n.to_string_lossy().into_owned()));
+                    match (std::fs::read(&parts[1]), name) {
+                        (Ok(bytes), Some(name)) => match filesystem::import_file(img, filesystem_mode, &name, &bytes) {
+                            Ok(()) => println!("Imported {} ({} bytes) as {}", parts[1], bytes.len(), name),
+                            Err(e) => println!("Error: {}", e),
+                        },
+                        (Err(e), _) => println!("Error reading file: {}", e),
+                        (_, None) => println!("Error: host path has no filename"),
+                    }
+                } else {
+                    println!("No image loaded.");
+                }
+            }
+            "fs-delete" => {
+                if let Some(ref mut img) = image {
+                    if parts.len() < 2 {
+                        println!("Usage: fs-delete <disk_name>");
+                        continue;
+                    }
+                    match filesystem::delete_file(img, filesystem_mode, &parts[1]) {
+                        Ok(()) => println!("Deleted {}", parts[1]),
+                        Err(e) => println!("Error: {}", e),
+                    }
+                } else {
+                    println!("No image loaded.");
+                }
+            }
             "fs-switch" => {
                 if parts.len() < 2 {
                     // Show current mode
@@ -905,6 +941,8 @@ fn print_help() {
     println!("  fs-export <file> [output_path] [raw] - Export file from disk to host filesystem");
     println!("                                         (output_path defaults to filename if not specified)");
     println!("                                         (strips AMSDOS/PLUS3DOS headers by default, use 'raw' to preserve)");
+    println!("  fs-import <host_path> [disk_name] - Add a file to the current filesystem");
+    println!("  fs-delete <disk_name>          - Delete a file from the current filesystem");
     println!();
     println!("Analysis:");
     println!("  protection                     - Detect copy protection scheme");
