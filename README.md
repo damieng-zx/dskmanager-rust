@@ -96,6 +96,8 @@ dsk disk.json
 
 `open` and `save` detect the format from the file extension. You can open a `.dsk`, edit it, and `save` as `.json` — or vice versa. JSON files preserve all metadata (CHRN IDs, FDC status, per-sector data lengths) so the round-trip is lossless.
 
+`dsk report <directory> [output.csv|output.md]` analyzes DSK, MGT, TRD, and TD0 images, including supported images inside ZIP archives.
+
 ### Disk geometry presets
 
 Built-in configurations for common formats:

@@ -1,6 +1,6 @@
 //! Batch report generation for the `dsk report` subcommand.
 //!
-//! Walks a directory tree of `.dsk` files (including DSKs inside `.zip`
+//! Walks a directory tree of disk images (including images inside `.zip`
 //! archives) and emits a report in one of two formats:
 //!
 //! - `csv` — one row per disk: format, protection, structural fingerprint and
@@ -61,8 +61,8 @@ impl Format {
 
 #[derive(Default)]
 struct Counts {
-    dsks: usize,
-    dsks_from_zips: usize,
+    images: usize,
+    images_from_zips: usize,
     errors: usize,
 }
 
@@ -91,7 +91,8 @@ impl Filters {
 
         if let Some(ref fmt) = self.format {
             let spec = DiskSpecification::identify(image);
-            if !spec.format.to_ascii_lowercase().contains(&fmt.to_ascii_lowercase()) {
+            if !report_format(image, &spec).to_ascii_lowercase().contains(&fmt.to_ascii_lowercase())
+                && !image.format().name().to_ascii_lowercase().contains(&fmt.to_ascii_lowercase()) {
                 return false;
             }
         }
@@ -330,7 +331,7 @@ pub fn run(args: &[String]) -> i32 {
 
     let files = expand_pattern(&pattern);
     if files.is_empty() {
-        eprintln!("No .dsk files found matching: {}", pattern);
+        eprintln!("No disk images found matching: {}", pattern);
         return 1;
     }
     let root = common_root(&files);
@@ -385,8 +386,8 @@ pub fn run(args: &[String]) -> i32 {
     }
 
     eprintln!(
-        "Scanned {} dsk files ({} from zips), {} errors.",
-        counts.dsks, counts.dsks_from_zips, counts.errors
+        "Scanned {} disk images ({} from zips), {} errors.",
+        counts.images, counts.images_from_zips, counts.errors
     );
     0
 }
@@ -402,13 +403,22 @@ fn infer_format(output: Option<&String>) -> Option<Format> {
     }
 }
 
+fn report_format(image: &DiskImage, spec: &DiskSpecification) -> String {
+    match image.format() {
+        DiskImageFormat::RawTrd => "TR-DOS (TRD)".to_string(),
+        DiskImageFormat::RawMgt if !spec.format.starts_with("MGT") => "MGT".to_string(),
+        DiskImageFormat::RawTd0 => format!("{} [{}]", spec.format, image.format().name()),
+        _ => spec.format.clone(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Pattern expansion and file processing (shared by both output formats)
 // ---------------------------------------------------------------------------
 
-/// Expand a pattern into a sorted list of `.dsk` and `.zip` file paths.
+/// Expand a pattern into a sorted list of disk images and `.zip` file paths.
 ///
-/// - If the pattern is a directory, recursively finds all `.dsk`/`.zip` files.
+/// - If the pattern is a directory, recursively finds all supported images and `.zip` files.
 /// - If the pattern contains `*` or `?`, uses Windows-style glob expansion.
 /// - If the pattern is a single file, returns it as-is.
 fn expand_pattern(pattern: &str) -> Vec<PathBuf> {
@@ -430,6 +440,10 @@ fn expand_pattern(pattern: &str) -> Vec<PathBuf> {
     }
 }
 
+fn is_image_extension(extension: &str) -> bool {
+    matches!(extension.to_ascii_lowercase().as_str(), "dsk" | "mgt" | "trd" | "td0")
+}
+
 fn walk_dir(dir: &Path) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let entries = match fs::read_dir(dir) {
@@ -447,7 +461,7 @@ fn walk_dir(dir: &Path) -> Vec<PathBuf> {
             continue;
         }
         let ext = path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase());
-        if matches!(ext.as_deref(), Some("dsk") | Some("zip")) {
+        if ext.as_deref().map(is_image_extension).unwrap_or(false) || ext.as_deref() == Some("zip") {
             files.push(path);
         }
     }
@@ -477,7 +491,7 @@ fn expand_glob(pattern: &str) -> Vec<PathBuf> {
             continue;
         }
         let ext = path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase());
-        if matches!(ext.as_deref(), Some("dsk") | Some("zip")) {
+        if ext.as_deref().map(is_image_extension).unwrap_or(false) || ext.as_deref() == Some("zip") {
             files.push(path);
         }
     }
@@ -525,8 +539,8 @@ fn process_files(
     for path in files {
         let ext = path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase());
         match ext.as_deref() {
-            Some("dsk") => {
-                counts.dsks += 1;
+            Some(ext) if is_image_extension(ext) => {
+                counts.images += 1;
                 set_current_file(&path.display().to_string());
                 let image = DiskImage::open(path).map_err(|e| e.to_string());
                 if let Ok(ref img) = image {
@@ -549,8 +563,8 @@ fn process_files(
 }
 
 fn progress(counts: &Counts) {
-    if counts.dsks.is_multiple_of(250) {
-        eprintln!("  {} dsk files processed...", counts.dsks);
+    if counts.images.is_multiple_of(250) {
+        eprintln!("  {} disk images processed...", counts.images);
     }
 }
 
@@ -588,18 +602,19 @@ fn scan_zip(
             continue;
         }
         let name = zentry.name().to_string();
-        if !name.to_ascii_lowercase().ends_with(".dsk") {
-            continue;
-        }
+        let extension = match Path::new(&name).extension().and_then(|e| e.to_str()) {
+            Some(ext) if is_image_extension(ext) => ext,
+            _ => continue,
+        };
         let mut bytes = Vec::with_capacity(zentry.size() as usize);
         if zentry.read_to_end(&mut bytes).is_err() {
             continue;
         }
-        counts.dsks += 1;
-        counts.dsks_from_zips += 1;
+        counts.images += 1;
+        counts.images_from_zips += 1;
         let title = format!("{} → {}", zip_rel, name);
         set_current_file(&title);
-        let image = open_bytes(&bytes);
+        let image = open_bytes(&bytes, extension);
         if let Ok(ref img) = image {
             if !filters.matches(img) {
                 continue;
@@ -613,18 +628,57 @@ fn scan_zip(
     }
 }
 
-/// Open a DSK image from raw bytes by round-tripping through a temp file, since
+/// Open a disk image from raw bytes by round-tripping through a temp file, since
 /// `DiskImage::open` works from a path.
-fn open_bytes(bytes: &[u8]) -> std::result::Result<DiskImage, String> {
+fn open_bytes(bytes: &[u8], extension: &str) -> std::result::Result<DiskImage, String> {
     let tmp = std::env::temp_dir().join(format!(
-        "dskreport-{}-{}.dsk",
+        "dskreport-{}-{}.{}",
         std::process::id(),
-        rand_suffix()
+        rand_suffix(),
+        extension
     ));
     fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
     let result = DiskImage::open(&tmp).map_err(|e| e.to_string());
     let _ = fs::remove_file(&tmp);
     result
+}
+
+#[cfg(test)]
+mod format_tests {
+    use super::*;
+
+    #[test]
+    fn recognizes_all_image_extensions() {
+        for extension in ["dsk", "MGT", "TrD", "td0"] {
+            assert!(is_image_extension(extension));
+        }
+        assert!(!is_image_extension("txt"));
+        assert_eq!(open_bytes(&vec![0; 40 * 16 * 256], "trd").unwrap().format(), DiskImageFormat::RawTrd);
+        assert_eq!(open_bytes(&vec![0; 819_200], "mgt").unwrap().format(), DiskImageFormat::RawMgt);
+    }
+
+    #[test]
+    fn scans_trd_images_inside_zip_archives() {
+        let path = std::env::temp_dir().join(format!("dskreport_formats_{}.zip", std::process::id()));
+        let file = fs::File::create(&path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        writer.start_file("disk.trd", zip::write::SimpleFileOptions::default()).unwrap();
+        writer.write_all(&vec![0; 40 * 16 * 256]).unwrap();
+        writer.finish().unwrap();
+
+        let filters = Filters {
+            format: None, tracks: None, sides: None, sector_size: None,
+            protection: None, has_errors: false, quirks: false,
+        };
+        let mut counts = Counts::default();
+        let mut formats = Vec::new();
+        scan_zip(&std::env::temp_dir(), &path, &filters, &mut counts, &mut |_, _, image| {
+            formats.push(image.unwrap().format());
+        });
+        fs::remove_file(path).ok();
+        assert_eq!(formats, vec![DiskImageFormat::RawTrd]);
+        assert_eq!(counts.images_from_zips, 1);
+    }
 }
 
 fn rand_suffix() -> String {
@@ -696,7 +750,7 @@ fn csv_row(title: &str, image: &DiskImage) -> String {
     format!(
         "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         file,
-        escape_csv(&spec.format),
+        escape_csv(&report_format(image, &spec)),
         escape_csv(&spec.source),
         escape_csv(&protection_str),
         escape_csv(&protection_str),
@@ -1151,7 +1205,7 @@ fn analyze_image(image: &DiskImage) -> DiskEntry {
 
     DiskEntry {
         title: String::new(),
-        format: spec.format,
+        format: report_format(image, &spec),
         protection,
         protection_details: all_details,
         characteristics,
@@ -1164,8 +1218,9 @@ fn analyze_image(image: &DiskImage) -> DiskEntry {
 fn md_quirks(image: &DiskImage, spec: &DiskSpecification) -> Vec<String> {
     let mut quirks = Vec::new();
 
-    let standard_sectors = spec.sectors_per_track as usize;
-    let standard_size = spec.sector_size as usize;
+    let is_raw = matches!(image.format(), DiskImageFormat::RawMgt | DiskImageFormat::RawTrd);
+    let standard_sectors = if is_raw { image.spec().sectors_per_track } else { spec.sectors_per_track } as usize;
+    let standard_size = if is_raw { image.spec().sector_size } else { spec.sector_size } as usize;
     let standard_first_id: Option<u8> = match spec.format.as_str() {
         f if f.starts_with("Amstrad CPC") && f.contains("data") => Some(0xC1),
         f if f.starts_with("Amstrad CPC") && f.contains("system") => Some(0x41),
@@ -1174,14 +1229,16 @@ fn md_quirks(image: &DiskImage, spec: &DiskSpecification) -> Vec<String> {
     };
     let standard_track_count: Option<u8> = match spec.format.as_str() {
         f if f.contains("MGT") => Some(80),
+        _ if is_raw => Some(image.spec().num_tracks),
         _ => Some(spec.tracks_per_side),
     };
 
-    if image.disks().len() != spec.side_count() as usize {
+    let expected_sides = if is_raw { image.spec().num_sides } else { spec.side_count() };
+    if image.disks().len() != expected_sides as usize {
         quirks.push(format!(
             "Image has {} side(s) but format implies {}",
             image.disks().len(),
-            spec.side_count()
+            expected_sides
         ));
     }
 
@@ -1229,7 +1286,7 @@ fn md_quirks(image: &DiskImage, spec: &DiskSpecification) -> Vec<String> {
         let mut alt_filler_tracks: Vec<(usize, usize)> = Vec::new();
 
         let standard_track_size = standard_sectors * standard_size;
-        let standard_filler = 0xE5u8;
+        let standard_filler = if is_raw { image.spec().filler_byte } else { 0xE5u8 };
 
         for t_idx in 0..total_tracks {
             let track = match disk.get_track(t_idx as u8) {
@@ -1495,11 +1552,11 @@ fn write_markdown(
     writeln!(out)?;
     writeln!(
         out,
-        "Scanned `{}` — {} dsk files across {} folders ({} from zips, {} errors).",
+        "Scanned `{}` — {} disk images across {} folders ({} from zips, {} errors).",
         root.display(),
-        counts.dsks,
+        counts.images,
         sections.len(),
-        counts.dsks_from_zips,
+        counts.images_from_zips,
         counts.errors,
     )?;
     writeln!(out)?;

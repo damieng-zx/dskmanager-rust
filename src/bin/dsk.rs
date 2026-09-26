@@ -135,7 +135,7 @@ fn main() {
             println!();
             println!("Commands:");
             println!("  report <pattern> [output] [--format csv|markdown]");
-            println!("      Batch-analyze .dsk files matching <pattern> (dir, glob, or single file).");
+            println!("      Batch-analyze .dsk/.mgt/.trd/.td0 files (dir, glob, or single file).");
             println!("      Also scans inside .zip archives found in the pattern.");
             println!("      Writes a report to [output] (stdout if omitted).");
             println!("      Format defaults to CSV, or inferred from extension (.csv / .md).");
