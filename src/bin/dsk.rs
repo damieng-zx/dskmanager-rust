@@ -44,6 +44,7 @@ impl CommandCompleter {
                 "fs-export",
                 "fs-import",
                 "fs-delete",
+                "fs-format",
                 "fs-info",
                 "protection",
                 "disassemble",
@@ -241,21 +242,28 @@ fn main() {
                 }
             }
             "create" => {
-                let spec = if parts.len() > 1 {
-                    match parts[1].as_str() {
-                        "amstrad" => FormatSpec::amstrad_data(),
-                        "spectrum" => FormatSpec::spectrum_plus3(),
-                        "pcw" => FormatSpec::pcw_ssdd(),
-                        _ => FormatSpec::amstrad_data(),
+                let created = match parts.get(1).map(String::as_str).unwrap_or("amstrad") {
+                    "system" => DiskImage::create(FormatSpec::amstrad_system()),
+                    "spectrum" => DiskImage::create(FormatSpec::spectrum_plus3()),
+                    "pcw" => DiskImage::create(FormatSpec::pcw_ssdd()),
+                    "mgt" => DiskImage::builder().format(DiskImageFormat::RawMgt)
+                        .spec(FormatSpec::new(2, 80, 10, 512).with_first_sector_id(1).with_filler_byte(0)).build(),
+                    "trdos" => DiskImage::builder().format(DiskImageFormat::RawTrd)
+                        .spec(FormatSpec::trdos()).build(),
+                    "amstrad" => DiskImage::create(FormatSpec::amstrad_data()),
+                    _ => {
+                        println!("Usage: create [amstrad|system|spectrum|pcw|mgt|trdos]");
+                        continue;
                     }
-                } else {
-                    FormatSpec::amstrad_data()
                 };
-
-                match DiskImage::create(spec) {
+                match created.and_then(|mut img| {
+                    filesystem::format_filesystem(&mut img, FileSystemType::Auto)?;
+                    Ok(img)
+                }) {
                     Ok(img) => {
-                        println!("Created new {} image", img.format().name());
+                        println!("Created formatted {} image", img.format().name());
                         image = Some(img);
+                        filesystem_mode = FileSystemType::Auto;
                     }
                     Err(e) => println!("Error: {}", e),
                 }
@@ -689,6 +697,25 @@ fn main() {
                     println!("No image loaded.");
                 }
             }
+            "fs-format" => {
+                if let Some(ref mut img) = image {
+                    let mode = if let Some(arg) = parts.get(1) {
+                        match FileSystemType::from_str(arg) {
+                            Some(mode) => mode,
+                            None => {
+                                println!("Usage: fs-format [auto|cpm|mgt|trdos]");
+                                continue;
+                            }
+                        }
+                    } else { filesystem_mode };
+                    match filesystem::format_filesystem(img, mode) {
+                        Ok(()) => println!("Filesystem formatted ({}). All previous files erased.", mode),
+                        Err(e) => println!("Error: {}", e),
+                    }
+                } else {
+                    println!("No image loaded.");
+                }
+            }
             "fs-switch" => {
                 if parts.len() < 2 {
                     // Show current mode
@@ -923,7 +950,7 @@ fn parse_command_line(input: &str) -> Vec<String> {
 fn print_help() {
     println!("Disk Management:");
     println!("  open <path>                    - Open a disk image file (use quotes for paths with spaces)");
-    println!("  create [amstrad|spectrum|pcw]  - Create a new DSK image");
+    println!("  create [amstrad|system|spectrum|pcw|mgt|trdos] - Create and format a new image");
     println!("  save <path>                    - Save image to file (use quotes for paths with spaces)");
     println!("  info                           - Show disk information");
     println!("  specification                  - Detect and display disk specification (spec)");
@@ -943,6 +970,7 @@ fn print_help() {
     println!("                                         (strips AMSDOS/PLUS3DOS headers by default, use 'raw' to preserve)");
     println!("  fs-import <host_path> [disk_name] - Add a file to the current filesystem");
     println!("  fs-delete <disk_name>          - Delete a file from the current filesystem");
+    println!("  fs-format [auto|cpm|mgt|trdos] - Erase and initialize the filesystem");
     println!();
     println!("Analysis:");
     println!("  protection                     - Detect copy protection scheme");

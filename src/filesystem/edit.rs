@@ -59,7 +59,7 @@ fn cpm_name(name: &str) -> Result<(u8, [u8; 11])> {
     Ok((user, raw))
 }
 
-fn cpm_address(image: &DiskImage, spec: &DiskSpecification, absolute: usize) -> Result<(u8, u8, u8)> {
+pub(super) fn cpm_address(image: &DiskImage, spec: &DiskSpecification, absolute: usize) -> Result<(u8, u8, u8)> {
     let spt = spec.sectors_per_track as usize;
     let tps = spec.tracks_per_side as usize;
     if spt == 0 || tps == 0 { return Err(DskError::filesystem("Invalid CP/M geometry")); }

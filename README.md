@@ -46,7 +46,7 @@ dsk disk.json
 |---------|-------------|
 | `open <path>` | Open a .dsk, .mgt, .trd, .td0, or .json file |
 | `save <path>` | Save image (format determined by extension) |
-| `create [amstrad\|spectrum\|pcw]` | Create a new blank disk image |
+| `create [amstrad\|system\|spectrum\|pcw\|mgt\|trdos]` | Create a disk with an initialized filesystem |
 | `info` | Show disk information |
 | `spec` | Show the disk specification (geometry, filesystem layout) |
 
@@ -59,6 +59,7 @@ dsk disk.json
 | `fs-export <filename> [output] [raw]` | Export file to host (strips headers unless `raw`; CP/M user prefix supported) |
 | `fs-import <host_path> [disk_name]` | Import a file (CP/M 8.3, MGT 10-character, TR-DOS 8-character + type `.C`/`.B`/`.D`/`.#`) |
 | `fs-delete <disk_name>` | Delete a file and release its allocation |
+| `fs-format [auto\|cpm\|mgt\|trdos]` | Erase the disk and initialize a filesystem |
 | `fs-switch [auto\|cpm\|mgt\|trdos]` | Switch filesystem driver |
 | `fs-info` | Show filesystem details |
 

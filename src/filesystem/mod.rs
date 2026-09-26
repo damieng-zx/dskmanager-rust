@@ -6,6 +6,8 @@ pub mod cpm;
 pub mod disciple;
 /// Filesystem file import and deletion
 pub mod edit;
+/// Initialize blank filesystems
+pub mod formatting;
 /// MGT filesystem base implementation
 pub mod mgt;
 /// SAM Coupe filesystem implementation
@@ -16,6 +18,7 @@ pub mod trdos;
 pub use cpm::CpmFileSystem;
 pub use disciple::DiscipleFileSystem;
 pub use edit::{delete_file, import_file};
+pub use formatting::format_filesystem;
 pub use mgt::{MgtDirEntry, MgtFileSystem, MgtFileType, MgtSystemType};
 pub use sam::SamFileSystem;
 pub use trdos::{TrdosCatalog, TrdosDirEntry, TrdosFileSystem, TrdosFileType};
