@@ -408,6 +408,7 @@ fn report_format(image: &DiskImage, spec: &DiskSpecification) -> String {
         DiskImageFormat::RawTrd => "TR-DOS (TRD)".to_string(),
         DiskImageFormat::RawMgt if !spec.format.starts_with("MGT") => "MGT".to_string(),
         DiskImageFormat::RawTd0 => format!("{} [{}]", spec.format, image.format().name()),
+        DiskImageFormat::RawScl => "TR-DOS archive (SCL)".to_string(),
         _ => spec.format.clone(),
     }
 }
@@ -441,7 +442,7 @@ fn expand_pattern(pattern: &str) -> Vec<PathBuf> {
 }
 
 fn is_image_extension(extension: &str) -> bool {
-    matches!(extension.to_ascii_lowercase().as_str(), "dsk" | "mgt" | "trd" | "td0")
+    matches!(extension.to_ascii_lowercase().as_str(), "dsk" | "mgt" | "trd" | "td0" | "scl")
 }
 
 fn walk_dir(dir: &Path) -> Vec<PathBuf> {
@@ -649,7 +650,7 @@ mod format_tests {
 
     #[test]
     fn recognizes_all_image_extensions() {
-        for extension in ["dsk", "MGT", "TrD", "td0"] {
+        for extension in ["dsk", "MGT", "TrD", "td0", "scl"] {
             assert!(is_image_extension(extension));
         }
         assert!(!is_image_extension("txt"));
@@ -1218,7 +1219,7 @@ fn analyze_image(image: &DiskImage) -> DiskEntry {
 fn md_quirks(image: &DiskImage, spec: &DiskSpecification) -> Vec<String> {
     let mut quirks = Vec::new();
 
-    let is_raw = matches!(image.format(), DiskImageFormat::RawMgt | DiskImageFormat::RawTrd);
+    let is_raw = matches!(image.format(), DiskImageFormat::RawMgt | DiskImageFormat::RawTrd | DiskImageFormat::RawScl);
     let standard_sectors = if is_raw { image.spec().sectors_per_track } else { spec.sectors_per_track } as usize;
     let standard_size = if is_raw { image.spec().sector_size } else { spec.sector_size } as usize;
     let standard_first_id: Option<u8> = match spec.format.as_str() {

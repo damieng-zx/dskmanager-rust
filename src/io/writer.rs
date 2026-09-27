@@ -18,6 +18,7 @@ pub fn write_dsk<P: AsRef<Path>>(image: &DiskImage, path: P) -> Result<()> {
         DiskImageFormat::RawMgt => write_mgt(&mut file, image),
         DiskImageFormat::RawTrd => write_trd(&mut file, image),
         DiskImageFormat::RawTd0 => write_td0(&mut file, image),
+        DiskImageFormat::RawScl => crate::io::scl::write_scl(&mut file, image),
     }
 }
 

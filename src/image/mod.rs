@@ -38,7 +38,7 @@ pub struct DiskImage {
 }
 
 impl DiskImage {
-    /// Open a DSK, MGT, TRD, or TD0 file from disk
+    /// Open a DSK, MGT, TRD, TD0, or SCL file from disk
     ///
     /// Automatically detects file type based on extension:
     /// - `.mgt` files are read as raw MGT format
@@ -52,6 +52,8 @@ impl DiskImage {
             crate::io::read_mgt(path)
         } else if crate::io::is_td0_file(&path) {
             crate::io::read_td0(path)
+        } else if crate::io::is_scl_file(&path) {
+            crate::io::read_scl(path)
         } else {
             crate::io::reader::read_dsk(path)
         }
@@ -213,6 +215,8 @@ impl DiskImage {
                     return Err(DskError::invalid_format("TD0 requires one or two sides"));
                 }
                 DiskImageFormat::RawTd0
+            } else if extension.eq_ignore_ascii_case("scl") {
+                DiskImageFormat::RawScl
             } else if extension.eq_ignore_ascii_case("dsk") {
                 match self.format {
                     DiskImageFormat::StandardDSK | DiskImageFormat::ExtendedDSK => self.format,

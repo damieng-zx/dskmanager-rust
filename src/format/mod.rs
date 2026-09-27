@@ -28,6 +28,8 @@ pub enum DiskImageFormat {
     RawTrd,
     /// TeleDisk format (TD0), normalized to tracks and sectors
     RawTd0,
+    /// SCL TR-DOS file archive, materialized as a TR-DOS disk
+    RawScl,
 }
 
 impl DiskImageFormat {
@@ -39,6 +41,7 @@ impl DiskImageFormat {
             DiskImageFormat::RawMgt => &[], // Raw MGT has no magic bytes
             DiskImageFormat::RawTrd => &[], // Raw TRD has no magic bytes
             DiskImageFormat::RawTd0 => b"TD", // TD0 accepts both TD and td
+            DiskImageFormat::RawScl => b"SINCLAIR",
         }
     }
 
@@ -50,6 +53,7 @@ impl DiskImageFormat {
             DiskImageFormat::RawMgt => "Raw MGT",
             DiskImageFormat::RawTrd => "TR-DOS (TRD)",
             DiskImageFormat::RawTd0 => "TeleDisk (TD0)",
+            DiskImageFormat::RawScl => "TR-DOS archive (SCL)",
         }
     }
 
@@ -61,6 +65,7 @@ impl DiskImageFormat {
             DiskImageFormat::RawMgt => FileSystemType::Mgt,
             DiskImageFormat::RawTrd => FileSystemType::Trdos,
             DiskImageFormat::RawTd0 => FileSystemType::Cpm,
+            DiskImageFormat::RawScl => FileSystemType::Trdos,
         }
     }
 }

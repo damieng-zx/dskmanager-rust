@@ -1,6 +1,6 @@
 # DSK Manager
 
-A command-line tool and Rust library for reading, writing, and analyzing DSK, MGT, TRD, and TD0 disk image files. Built for retro computing enthusiasts working with Amstrad CPC, ZX Spectrum +3, Amstrad PCW, SAM Coupe, and IBM PC floppy images.
+A command-line tool and Rust library for reading, writing, and analyzing DSK, MGT, TRD, TD0, and SCL disk files. Built for retro computing enthusiasts working with Amstrad CPC, ZX Spectrum +3/TR-DOS, Amstrad PCW, SAM Coupe, and IBM PC floppy images.
 
 ## Install
 
@@ -21,6 +21,7 @@ dsk disk.dsk
 dsk disk.mgt
 dsk disk.trd
 dsk disk.td0
+dsk disk.scl
 dsk disk.json
 ```
 
@@ -44,8 +45,8 @@ dsk disk.json
 
 | Command | Description |
 |---------|-------------|
-| `open <path>` | Open a .dsk, .mgt, .trd, .td0, or .json file |
-| `save <path>` | Save image (format determined by extension) |
+| `open <path>` | Open a .dsk, .mgt, .trd, .td0, .scl, or .json file |
+| `save <path>` | Save image (format determined by extension, including SCL export) |
 | `create [amstrad\|system\|spectrum\|pcw\|mgt\|trdos]` | Create a disk with an initialized filesystem |
 | `info` | Show disk information |
 | `spec` | Show the disk specification (geometry, filesystem layout) |
@@ -95,11 +96,12 @@ dsk disk.json
 | MGT raw | `.mgt` | 800KB DSDD raw sector dump (SAM Coupe, DISCiPLE/+D) |
 | TRD raw | `.trd` | TR-DOS raw sector dump (ZX Spectrum Beta Disk Interface) — **experimental** |
 | TeleDisk | `.td0` | TeleDisk track/sector image, including LZHUF and legacy LZW compression; writing uses uncompressed TD0 |
+| SCL | `.scl` | TR-DOS file archive, exposed as a virtual TR-DOS disk for listing and editing |
 | JSON | `.json` | Human-readable, editable representation of any format |
 
 `open` and `save` detect the format from the file extension. You can open a `.dsk`, edit it, and `save` as `.json` — or vice versa. JSON files preserve all metadata (CHRN IDs, FDC status, per-sector data lengths) so the round-trip is lossless.
 
-`dsk report <directory> [output.csv|output.md]` analyzes DSK, MGT, TRD, and TD0 images, including supported images inside ZIP archives.
+`dsk report <directory> [output.csv|output.md]` analyzes DSK, MGT, TRD, TD0, and SCL images, including supported images inside ZIP archives.
 
 ### Disk geometry presets
 
