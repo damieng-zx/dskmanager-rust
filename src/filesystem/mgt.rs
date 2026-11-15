@@ -397,32 +397,39 @@ impl<'a> MgtFileSystem<'a> {
 
     /// Read extended directory listing
     pub fn read_dir_extended(&self) -> Result<Vec<ExtendedDirEntry>> {
-        let mut entries = Vec::new();
+        self.read_dir_with(|entry| {
+            let header = self.parse_file_header(entry, &[]);
+            (header, self.recorded_file_size(entry))
+        })
+    }
 
-        for dir_entry in &self.directory_entries {
-            // Parse metadata from directory entry (MGT stores metadata in directory, not headers in file data)
-            let header = if dir_entry.sectors_used > 0 {
-                match self.read_file(dir_entry) {
-                    Ok(data) => self.parse_file_header(dir_entry, &data),
-                    Err(_) => FileHeader::default(),
+    /// Build an extended listing, letting the caller supply the per-entry
+    /// header and reported size.
+    ///
+    /// DISCIPLE and SAM differ from the base layout only in how they decode
+    /// metadata from the directory entry, so they share this loop rather than
+    /// repeating the field mapping.
+    pub fn read_dir_with<F>(&self, describe: F) -> Result<Vec<ExtendedDirEntry>>
+    where
+        F: Fn(&MgtDirEntry) -> (FileHeader, usize),
+    {
+        Ok(self
+            .directory_entries
+            .iter()
+            .map(|dir_entry| {
+                let (header, size) = describe(dir_entry);
+                ExtendedDirEntry {
+                    name: dir_entry.filename.clone(),
+                    user: 0, // MGT doesn't have user numbers
+                    index: dir_entry.index,
+                    blocks: dir_entry.sectors_used as usize,
+                    allocated: dir_entry.file_size(),
+                    size,
+                    attributes: dir_entry.attributes(),
+                    header,
                 }
-            } else {
-                FileHeader::default()
-            };
-
-            entries.push(ExtendedDirEntry {
-                name: dir_entry.filename.clone(),
-                user: 0, // MGT doesn't have user numbers
-                index: dir_entry.index,
-                blocks: dir_entry.sectors_used as usize,
-                allocated: dir_entry.file_size(),
-                size: self.recorded_file_size(dir_entry),
-                attributes: dir_entry.attributes(),
-                header,
-            });
-        }
-
-        Ok(entries)
+            })
+            .collect())
     }
 
     /// Actual file length. Disciple/+D store it at 0xD4; when that field is

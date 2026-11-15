@@ -93,24 +93,11 @@ impl<'a> SamFileSystem<'a> {
 
     /// Read directory with SAM-specific information
     pub fn read_dir_extended(&self) -> Result<Vec<ExtendedDirEntry>> {
-        let mut entries = Vec::new();
-
-        for dir_entry in self.mgt.directory() {
-            let header = self.parse_sam_header(dir_entry);
-
-            entries.push(ExtendedDirEntry {
-                name: dir_entry.filename.clone(),
-                user: 0,
-                index: dir_entry.index,
-                blocks: dir_entry.sectors_used as usize,
-                allocated: dir_entry.file_size(),
-                size: dir_entry.file_size(),
-                attributes: dir_entry.attributes(),
-                header,
-            });
-        }
-
-        Ok(entries)
+        self.mgt.read_dir_with(|entry| {
+            // SAM entries carry no Disciple length field; the allocation is the
+            // best available size.
+            (self.parse_sam_header(entry), entry.file_size())
+        })
     }
 
     /// Parse SAM-specific metadata from directory entry
@@ -230,6 +217,28 @@ impl<'a> SamFileSystem<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_dir_extended_reports_sam_metadata_per_entry() {
+        // SAM listings decode their own header and use the allocation as size.
+        use crate::filesystem::{format_filesystem, import_file, FileSystemType};
+        use crate::format::{DiskImageFormat, FormatSpec};
+
+        let mut image = DiskImage::builder()
+            .format(DiskImageFormat::RawMgt)
+            .spec(FormatSpec::new(2, 80, 10, 512).with_first_sector_id(1).with_filler_byte(0))
+            .build()
+            .unwrap();
+        format_filesystem(&mut image, FileSystemType::Mgt).unwrap();
+        import_file(&mut image, FileSystemType::Mgt, "PROG", &[0x41; 700]).unwrap();
+
+        let fs = SamFileSystem::new(&image).unwrap();
+        let entries = fs.read_dir_extended().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "PROG");
+        assert_eq!(entries[0].size, 1024);
+        assert!(!entries[0].header.meta.is_empty());
+    }
 
     #[test]
     fn test_sam_file_type_display() {

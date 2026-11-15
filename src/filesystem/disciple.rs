@@ -141,25 +141,9 @@ impl<'a> DiscipleFileSystem<'a> {
 
     /// Read directory with Disciple-specific information
     pub fn read_dir_extended(&self) -> Result<Vec<ExtendedDirEntry>> {
-        let mut entries = Vec::new();
-
-        for dir_entry in self.mgt.directory() {
-            let header = self.parse_disciple_header(dir_entry);
-            let file_size = self.get_file_size(dir_entry);
-
-            entries.push(ExtendedDirEntry {
-                name: dir_entry.filename.clone(),
-                user: 0,
-                index: dir_entry.index,
-                blocks: dir_entry.sectors_used as usize,
-                allocated: dir_entry.file_size(),
-                size: file_size,
-                attributes: dir_entry.attributes(),
-                header,
-            });
-        }
-
-        Ok(entries)
+        self.mgt.read_dir_with(|entry| {
+            (self.parse_disciple_header(entry), self.get_file_size(entry))
+        })
     }
 
     /// Parse Disciple-specific metadata from directory entry
@@ -262,6 +246,29 @@ impl<'a> DiscipleFileSystem<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_dir_extended_reports_disciple_metadata_per_entry() {
+        // The DISCIPLE listing decodes its own header and its 0xD4 length; the
+        // shared loop must still surface both per entry.
+        use crate::filesystem::{format_filesystem, import_file, FileSystemType};
+        use crate::format::{DiskImageFormat, FormatSpec};
+
+        let mut image = DiskImage::builder()
+            .format(DiskImageFormat::RawMgt)
+            .spec(FormatSpec::new(2, 80, 10, 512).with_first_sector_id(1).with_filler_byte(0))
+            .build()
+            .unwrap();
+        format_filesystem(&mut image, FileSystemType::Mgt).unwrap();
+        import_file(&mut image, FileSystemType::Mgt, "PROG", &[0x41; 700]).unwrap();
+
+        let fs = DiscipleFileSystem::new(&image).unwrap();
+        let entries = fs.read_dir_extended().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "PROG");
+        assert_eq!(entries[0].allocated, 1024, "two sectors allocated");
+        assert!(!entries[0].header.meta.is_empty());
+    }
 
     #[test]
     fn test_disciple_file_type_display() {
