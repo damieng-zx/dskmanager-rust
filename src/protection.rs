@@ -579,10 +579,7 @@ fn resolve_19sector(t0: &Track) -> Option<ProtectionResult> {
 fn resolve_8sector(disk: &Disk, t0: &Track) -> Option<ProtectionResult> {
     let cpc = is_cpc_disk(t0);
 
-    let t1 = match disk.get_track(1) {
-        Some(t) => t,
-        None => return None,
-    };
+    let t1 = disk.get_track(1)?;
 
     if t1.sector_count() == 8 {
         if let Some(t1s0) = t1.get_sector_by_index(0) {
