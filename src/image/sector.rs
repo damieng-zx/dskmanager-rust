@@ -265,6 +265,47 @@ mod tests {
     }
 
     #[test]
+    fn test_data_mut_length_change_does_not_corrupt_the_track() {
+        // Growing a sector's buffer through data_mut leaves data_length stale,
+        // and the writer silently discards the extra bytes. Either preserve the
+        // data or report the inconsistency; never drop it without notice.
+        use crate::format::DiskImageFormat;
+
+        let mut image = crate::image::DiskImage::builder()
+            .format(DiskImageFormat::ExtendedDSK)
+            .num_tracks(1)
+            .sectors_per_track(1)
+            .build()
+            .unwrap();
+        image
+            .get_disk_mut(0)
+            .unwrap()
+            .get_track_mut(0)
+            .unwrap()
+            .get_sector_mut(0xC1)
+            .unwrap()
+            .data_mut()
+            .extend_from_slice(&[0x99; 512]);
+        assert_eq!(image.read_sector(0, 0, 0xC1).unwrap().len(), 1024);
+
+        let path = std::env::temp_dir().join(format!("dskmgr_desync_{}.dsk", std::process::id()));
+        let saved = image.save(&path);
+        let reloaded = crate::image::DiskImage::open(&path);
+        std::fs::remove_file(path).ok();
+
+        match (saved, reloaded) {
+            // Acceptable: refuse to write a self-inconsistent sector.
+            (Err(_), _) => {}
+            // Acceptable: write it faithfully.
+            (Ok(()), Ok(img)) => {
+                assert_eq!(img.read_sector(0, 0, 0xC1).unwrap().len(), 1024);
+            }
+            // Unacceptable: silently truncated.
+            (Ok(()), Err(e)) => panic!("save succeeded but produced an unreadable image: {e}"),
+        }
+    }
+
+    #[test]
     fn test_sector_errors() {
         let id = SectorId::new(0, 0, 1, 2);
         let mut sector = Sector::new(id);

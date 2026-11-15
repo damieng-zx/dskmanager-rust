@@ -335,6 +335,17 @@ fn write_track(file: &mut File, track: &crate::image::Track, track_size: usize) 
         sib[4] = sector.fdc_status1.0;
         sib[5] = sector.fdc_status2.0;
 
+        // The stored length and the declared data length must agree. Mutating
+        // a sector through data_mut() can leave data_length stale, and writing
+        // it anyway silently dropped or misaligned data.
+        if sector.actual_size() != sector.data().len() {
+            return Err(crate::error::DskError::invalid_format(format!(
+                "Sector {} on track {} side {} has {} bytes but declares {}",
+                sector.id.sector, track.track_number, track.side_number,
+                sector.data().len(), sector.actual_size()
+            )));
+        }
+
         // Calculate stored size based on DSK format rules
         let max_stored = fdc_size_to_stored_bytes(sector.id.size_code);
         let sector_data = sector.data();
