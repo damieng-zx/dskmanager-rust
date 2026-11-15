@@ -411,25 +411,23 @@ fn decode_spectrum_float(bytes: &[u8]) -> String {
         return "0".to_string();
     }
 
-    let exponent_biased = bytes[0] as u8;
+    let exponent_biased = bytes[0];
+    // Zero is stored as five zero bytes.
+    if exponent_biased == 0 {
+        return "0".to_string();
+    }
     let exponent = exponent_biased as i32 - 128;
 
     // Extract sign from bit 7 of byte 1
     let is_negative = (bytes[1] & 0x80) != 0;
 
-    // Mantissa is stored big-endian in bytes 1-4
-    // Bit 31 is always 1 (assumed, normalized), so we reconstruct it
-    // Clear the sign bit from byte 1 and reconstruct the full mantissa
-    let byte1_without_sign = bytes[1] & 0x7F;
-    let mantissa_bytes = [byte1_without_sign, bytes[2], bytes[3], bytes[4]];
-    let mantissa_lower31 = u32::from_be_bytes(mantissa_bytes) & 0x7FFFFFFF;
-    
-    // Reconstruct full mantissa: set bit 31 (assumed 1) and use lower 31 bits
-    let mantissa = 0x80000000u32 | mantissa_lower31;
+    // The mantissa occupies bytes 1-4 with its leading 1 implied: the top bit
+    // of byte 1 holds the sign instead. Restore that implicit bit.
+    let mantissa_bytes = [bytes[1] | 0x80, bytes[2], bytes[3], bytes[4]];
+    let mantissa = u32::from_be_bytes(mantissa_bytes);
 
-    // Calculate value: (mantissa / 2^31) * 2^exponent
-    // The mantissa represents a value in [0.5, 1.0)
-    let mantissa_f = mantissa as f64 / (1u64 << 31) as f64;
+    // The mantissa represents a fraction in [0.5, 1.0), i.e. mantissa / 2^32.
+    let mantissa_f = mantissa as f64 / (1u64 << 32) as f64;
     let exp_f = 2.0_f64.powi(exponent);
     let value = mantissa_f * exp_f;
 
@@ -469,5 +467,29 @@ fn get_special_char(byte: u8) -> &'static str {
         0xA1 => "£",
         0xA2 => "$",
         _ => "?",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spectrum_float_decoding() {
+        // The decoder reconstructed the mantissa but scaled it by 2^31 instead
+        // of 2^32, so every value came out doubled (and negative-by-default for
+        // zero). These are the canonical ZX Spectrum encodings: exponent+128,
+        // then the mantissa with its implied leading 1 replaced by the sign bit.
+        assert_eq!(decode_spectrum_float(&[0x81, 0x40, 0x00, 0x00, 0x00]), "1.5");
+        assert_eq!(decode_spectrum_float(&[0x82, 0x00, 0x00, 0x00, 0x00]), "2");
+        assert_eq!(decode_spectrum_float(&[0x80, 0x00, 0x00, 0x00, 0x00]), "0.5");
+        assert_eq!(decode_spectrum_float(&[0x87, 0x48, 0x00, 0x00, 0x00]), "100");
+        assert_eq!(decode_spectrum_float(&[0x00, 0x00, 0x00, 0x00, 0x00]), "0");
+    }
+
+    #[test]
+    fn test_spectrum_float_negative() {
+        // The sign bit is the top bit of the first mantissa byte.
+        assert_eq!(decode_spectrum_float(&[0x81, 0xC0, 0x00, 0x00, 0x00]), "-1.5");
     }
 }
