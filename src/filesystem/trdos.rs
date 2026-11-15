@@ -391,11 +391,22 @@ impl<'a> FileSystem for TrdosFileSystem<'a> {
         let mut entries = Vec::new();
 
         for dir_entry in &self.directory {
+            // Deleted entries (type byte 0x01) are not live files.
+            if dir_entry.deleted {
+                continue;
+            }
+            // Report the length recorded in the directory entry, not the
+            // sector allocation: a 3-byte file occupies one 256-byte sector.
+            let size = if dir_entry.data_length > 0 {
+                dir_entry.data_length as usize
+            } else {
+                dir_entry.sector_count as usize * TRD_SECTOR_SIZE
+            };
             entries.push(DirEntry {
                 name: dir_entry.filename.clone(),
                 user: 0,
                 extent: 0,
-                size: dir_entry.sector_count as usize * TRD_SECTOR_SIZE,
+                size,
                 attributes: FileAttributes::default(),
             });
         }
@@ -440,6 +451,7 @@ impl<'a> FileSystem for TrdosFileSystem<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::image::{Disk, Sector, SectorId, Track};
 
     #[test]
     fn test_file_type_from_byte() {
@@ -560,6 +572,42 @@ mod tests {
         let cat = TrdosCatalog::parse(&data).unwrap();
         assert_eq!(cat.total_tracks(), 40);
         assert!(cat.is_double_sided());
+    }
+
+    #[test]
+    fn test_read_dir_reports_actual_file_length() {
+        // read_dir reported sector_count * 256, the allocation, instead of the
+        // length recorded in the directory entry.
+        let mut track = Track::new(0, 0);
+        let mut entry = [0u8; 16];
+        entry[0..8].copy_from_slice(b"TINY    ");
+        entry[8] = b'C';
+        entry[9..11].copy_from_slice(&3u16.to_le_bytes());
+        entry[13] = 1; // one 256-byte sector allocated
+        track.add_sector(Sector::with_data(
+            SectorId::new(0, 0, 1, 1),
+            entry.to_vec(),
+        ));
+        // Zero-filled slots are empty directory entries (type byte 0).
+        for id in 2..=8 {
+            track.add_sector(Sector::with_data(SectorId::new(0, 0, id, 1), vec![0u8; 256]));
+        }
+
+        let mut disk = Disk::new(0);
+        disk.add_track(track);
+        let image = DiskImage {
+            format: crate::format::DiskImageFormat::RawTrd,
+            spec: crate::format::FormatSpec::trdos(),
+            disks: vec![disk],
+            changed: false,
+            filename: None,
+            warnings: Vec::new(),
+        };
+
+        let fs = TrdosFileSystem::new(&image).unwrap();
+        let entries = fs.read_dir().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].size, 3);
     }
 
     #[test]
