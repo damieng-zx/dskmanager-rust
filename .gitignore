@@ -3,8 +3,9 @@
 **/*.rs.bk
 *.pdb
 
-# Cargo.lock (should be ignored for libraries, kept for binaries)
-Cargo.lock
+# Cargo.lock is committed: this crate ships a binary, so the lock file is what
+# makes a build reproducible (and keeps a yanked dependency from creeping back
+# in through a stale resolution).
 
 # IDE and editor files
 .vscode/
