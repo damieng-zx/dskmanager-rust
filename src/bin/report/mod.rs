@@ -21,6 +21,9 @@ use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+mod analysis;
+
+use analysis::DiskAnalysis;
 
 use dskmanager::*;
 
@@ -77,7 +80,17 @@ struct Filters {
 }
 
 impl Filters {
+    /// Analyse a fresh image and filter it.
+    ///
+    /// The scanner uses [`Self::matches_analysis`] with an analysis it already
+    /// built; this entry point is for callers and tests that hold only an image.
+    #[cfg_attr(not(test), allow(dead_code))]
     fn matches(&self, image: &DiskImage) -> bool {
+        self.matches_analysis(image, &DiskAnalysis::new(image))
+    }
+
+    /// Filter against an analysis that the caller already computed.
+    fn matches_analysis(&self, image: &DiskImage, analysis: &DiskAnalysis) -> bool {
         if self.format.is_none()
             && self.tracks.is_none()
             && self.sides.is_none()
@@ -90,8 +103,7 @@ impl Filters {
         }
 
         if let Some(ref fmt) = self.format {
-            let spec = DiskSpecification::identify(image);
-            if !report_format(image, &spec).to_ascii_lowercase().contains(&fmt.to_ascii_lowercase())
+            if !analysis.format.to_ascii_lowercase().contains(&fmt.to_ascii_lowercase())
                 && !image.format().name().to_ascii_lowercase().contains(&fmt.to_ascii_lowercase()) {
                 return false;
             }
@@ -125,37 +137,24 @@ impl Filters {
         }
 
         if let Some(ref prot_filter) = self.protection {
-            let any_match = image.disks().iter().any(|disk| {
-                let detected = protection::detect(disk);
-                match prot_filter {
-                    None => detected.is_some(),
-                    Some(ref text) => detected
-                        .as_ref()
-                        .map(|d| d.name.to_ascii_lowercase().contains(&text.to_ascii_lowercase()))
-                        .unwrap_or(false),
-                }
+            let any_match = analysis.protections.iter().any(|(_, found)| match prot_filter {
+                None => true,
+                Some(ref text) => found
+                    .name
+                    .to_ascii_lowercase()
+                    .contains(&text.to_ascii_lowercase()),
             });
             if !any_match {
                 return false;
             }
         }
 
-        if self.has_errors {
-            let any_match = image.disks().iter().any(|disk| {
-                disk.tracks().iter().any(|track| {
-                    track.sectors().iter().any(|sector| sector.has_error())
-                })
-            });
-            if !any_match {
-                return false;
-            }
+        if self.has_errors && !DiskAnalysis::has_fdc_errors(image) {
+            return false;
         }
 
-        if self.quirks {
-            let spec = DiskSpecification::identify(image);
-            if md_quirks(image, &spec).is_empty() {
-                return false;
-            }
+        if self.quirks && analysis.quirks.is_empty() {
+            return false;
         }
 
         true
@@ -334,7 +333,7 @@ pub fn run(args: &[String]) -> i32 {
             }
             process_files(&root, &files, &filters, &mut counts, &mut |title, _folder, image| {
                 let line = match image {
-                    Ok(img) => csv_row(&title, &img),
+                    Ok((img, analysis)) => csv_row(&title, &img, &analysis),
                     Err(e) => csv_error_row(&title, &e),
                 };
                 let _ = writeln!(writer, "{}", line);
@@ -344,8 +343,8 @@ pub fn run(args: &[String]) -> i32 {
             let mut sections: BTreeMap<String, Vec<DiskEntry>> = BTreeMap::new();
             process_files(&root, &files, &filters, &mut counts, &mut |title, folder, image| {
                 let entry = match image {
-                    Ok(img) => {
-                        let mut entry = analyze_image(&img);
+                    Ok((img, analysis)) => {
+                        let mut entry = analyze_image(&img, &analysis);
                         entry.title = title;
                         entry
                     }
@@ -525,7 +524,7 @@ fn process_files(
     files: &[PathBuf],
     filters: &Filters,
     counts: &mut Counts,
-    emit: &mut dyn FnMut(String, String, std::result::Result<DiskImage, String>),
+    emit: &mut dyn FnMut(String, String, std::result::Result<(DiskImage, DiskAnalysis), String>),
 ) {
     for path in files {
         let ext = path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase());
@@ -533,9 +532,14 @@ fn process_files(
             Some(ext) if is_image_extension(ext) => {
                 counts.images += 1;
                 set_current_file(&path.display().to_string());
-                let image = DiskImage::open(path).map_err(|e| e.to_string());
-                if let Ok(ref img) = image {
-                    if !filters.matches(img) {
+                let image = DiskImage::open(path)
+                    .map(|img| {
+                        let analysis = DiskAnalysis::new(&img);
+                        (img, analysis)
+                    })
+                    .map_err(|e| e.to_string());
+                if let Ok((img, analysis)) = &image {
+                    if !filters.matches_analysis(img, analysis) {
                         continue;
                     }
                 }
@@ -564,7 +568,7 @@ fn scan_zip(
     zip_path: &Path,
     filters: &Filters,
     counts: &mut Counts,
-    emit: &mut dyn FnMut(String, String, std::result::Result<DiskImage, String>),
+    emit: &mut dyn FnMut(String, String, std::result::Result<(DiskImage, DiskAnalysis), String>),
 ) {
     let file = match fs::File::open(zip_path) {
         Ok(f) => f,
@@ -605,9 +609,12 @@ fn scan_zip(
         counts.images_from_zips += 1;
         let title = format!("{} → {}", zip_rel, name);
         set_current_file(&title);
-        let image = open_bytes(&bytes, extension);
-        if let Ok(ref img) = image {
-            if !filters.matches(img) {
+        let image = open_bytes(&bytes, extension).map(|img| {
+            let analysis = DiskAnalysis::new(&img);
+            (img, analysis)
+        });
+        if let Ok((img, analysis)) = &image {
+            if !filters.matches_analysis(img, analysis) {
                 continue;
             }
         }
@@ -712,7 +719,7 @@ mod format_tests {
         let mut counts = Counts::default();
         let mut formats = Vec::new();
         scan_zip(&std::env::temp_dir(), &path, &filters, &mut counts, &mut |_, _, image| {
-            formats.push(image.unwrap().format());
+            formats.push(image.unwrap().0.format());
         });
         fs::remove_file(path).ok();
         assert_eq!(formats, vec![DiskImageFormat::RawTrd]);
@@ -755,42 +762,17 @@ fn relative_display(root: &Path, path: &Path) -> String {
 // CSV output
 // ---------------------------------------------------------------------------
 
-fn csv_row(title: &str, image: &DiskImage) -> String {
-    let spec = DiskSpecification::identify(image);
-
-    let mut protections = Vec::new();
-    for disk in image.disks() {
-        if let Some(prot) = protection::detect(disk) {
-            let mut entry = format!("{} | {}", prot.name, prot.reason);
-            if !prot.details.is_empty() {
-                entry.push_str(" | ");
-                entry.push_str(&prot.details.join(" | "));
-            }
-            protections.push(entry);
-        }
-    }
-    let protection_str = if protections.is_empty() {
-        String::new()
-    } else {
-        protections.join(" ; ")
-    };
-
+fn csv_row(title: &str, image: &DiskImage, analysis: &DiskAnalysis) -> String {
     let chars = compute_csv_chars(image);
     let fingerprint = chars.fingerprint();
     let file = title.replace(',', ";");
-
-    let boot = BootDetection::detect(image);
-    let bootable_on = if boot.system.is_empty() {
-        "Not bootable"
-    } else {
-        &boot.system
-    };
+    let protection_str = analysis.protection_csv();
 
     format!(
         "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
         file,
-        escape_csv(&report_format(image, &spec)),
-        escape_csv(&spec.source),
+        escape_csv(&analysis.format),
+        escape_csv(&analysis.spec.source),
         escape_csv(&protection_str),
         escape_csv(&protection_str),
         escape_csv(&fingerprint),
@@ -807,8 +789,8 @@ fn csv_row(title: &str, image: &DiskImage) -> String {
         chars.empty_tracks,
         chars.biggest_track_bytes,
         escape_csv(&chars.sector_count_pattern),
-        escape_csv(bootable_on),
-        escape_csv(&boot.reason),
+        escape_csv(analysis.bootable_on()),
+        escape_csv(&analysis.boot.reason),
     )
 }
 
@@ -1208,49 +1190,16 @@ struct DiskEntry {
     boot_reason: String,
 }
 
-fn analyze_image(image: &DiskImage) -> DiskEntry {
-    let spec = DiskSpecification::identify(image);
-
-    let mut prot_strs = Vec::new();
-    let mut all_details = Vec::new();
-    for (side_idx, disk) in image.disks().iter().enumerate() {
-        if let Some(p) = protection::detect(disk) {
-            if image.disks().len() > 1 {
-                prot_strs.push(format!("Side {}: {} ({})", side_idx, p.name, p.reason));
-                if !p.details.is_empty() {
-                    all_details.push(format!("Side {}:", side_idx));
-                    all_details.extend(p.details.clone());
-                }
-            } else {
-                prot_strs.push(format!("{} ({})", p.name, p.reason));
-                all_details.extend(p.details);
-            }
-        }
-    }
-    let protection = if prot_strs.is_empty() {
-        "None detected".to_string()
-    } else {
-        prot_strs.join("; ")
-    };
-
-    let characteristics = md_quirks(image, &spec);
-
-    let boot = BootDetection::detect(image);
-    let bootable_on = if boot.system.is_empty() {
-        "Not bootable".to_string()
-    } else {
-        boot.system.clone()
-    };
-
+fn analyze_image(image: &DiskImage, analysis: &DiskAnalysis) -> DiskEntry {
     DiskEntry {
         title: String::new(),
-        format: report_format(image, &spec),
-        protection,
-        protection_details: all_details,
-        characteristics,
+        format: analysis.format.clone(),
+        protection: analysis.protection_summary(),
+        protection_details: analysis.protection_details(),
+        characteristics: analysis.quirks.clone(),
         warnings: image.warnings().to_vec(),
-        bootable_on,
-        boot_reason: boot.reason,
+        bootable_on: analysis.bootable_on().to_string(),
+        boot_reason: analysis.boot.reason.clone(),
     }
 }
 
