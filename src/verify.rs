@@ -516,7 +516,15 @@ fn check_cpm_filesystem(image: &DiskImage, issues: &mut Vec<VerifyIssue>) {
             }
         }
 
-        match fs.read_file(&entry.name) {
+        // Entries from users other than 0 must be addressed with their prefix,
+        // otherwise the lookup resolves to user 0 and fails.
+        let qualified_name = if entry.user == 0 {
+            entry.name.clone()
+        } else {
+            format!("{}:{}", entry.user, entry.name)
+        };
+
+        match fs.read_file(&qualified_name) {
             Ok(data) => {
                 let header = crate::filesystem::try_parse_header(&data);
                 if header.header_type != crate::filesystem::HeaderType::None && !header.checksum_valid {
@@ -539,8 +547,7 @@ fn check_cpm_filesystem(image: &DiskImage, issues: &mut Vec<VerifyIssue>) {
             }
         }
 
-        file_blocks.insert(entry.name.clone(), entry.blocks);
-    }
+        file_blocks.insert(entry.name.clone(), entry.blocks);    }
 
     let fs_info = fs.info();
     let total_blocks = fs_info.total_blocks;
@@ -647,8 +654,27 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_report_display() {
-        let mut report = VerifyReport { issues: vec![] };
+    fn test_verify_reads_files_belonging_to_other_users() {
+        // A file imported as "2:HIDDEN.BIN" lives in user 2. Reading it by bare
+        // name resolved to user 0, so verify reported "File not found" and
+        // failed a perfectly good disk.
+        use crate::filesystem::import_file;
+        use crate::filesystem::FileSystemType;
+
+        let mut image = DiskImage::create(FormatSpec::amstrad_data()).unwrap();
+        crate::filesystem::format_filesystem(&mut image, FileSystemType::Cpm).unwrap();
+        import_file(&mut image, FileSystemType::Cpm, "2:HIDDEN.BIN", &[0x41; 400]).unwrap();
+
+        let report = verify(&image);
+        assert!(
+            report.error_count() == 0,
+            "unexpected errors: {:?}",
+            report.issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_verify_report_display() {        let mut report = VerifyReport { issues: vec![] };
         add(&mut report.issues, Severity::Error, IssueLocation::Sector(0, 0, 0xC1), "Test error");
         let s = format!("{}", report);
         assert!(s.contains("ERROR"));
