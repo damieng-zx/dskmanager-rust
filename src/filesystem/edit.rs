@@ -210,7 +210,8 @@ fn mgt_import(image: &mut DiskImage, name: &str, data: &[u8]) -> Result<()> {
         let side = if entry.start_track >= 128 { 1 } else { 0 };
         let track = (entry.start_track & 0x7f) as usize;
         let start = side * 800 + track * 10 + entry.start_sector.saturating_sub(1) as usize;
-        for index in start..start.saturating_add(entry.sectors_used as usize).min(1600) { used[index] = true; }
+        let end = start.saturating_add(entry.sectors_used as usize).min(1600);
+        used[start..end].fill(true);
     }
     let slot = (0..80).find(|&i| {
         let (side, track, id, offset) = mgt_location(i);
