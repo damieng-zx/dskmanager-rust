@@ -1107,7 +1107,7 @@ mod tests {
         // Patch byte 15 (the existing 0 in spec block) to make checksum = 3
         let target = 3u32;
         let delta = (target + 256 - current) % 256;
-        full[15] = (full[15] as u32 + delta) as u8 & 0xFF;
+        full[15] = (full[15] as u32 + delta) as u8;
 
         // Sanity check
         let new_sum: u32 = full.iter().fold(0u32, |acc, &b| (acc + b as u32) % 256);

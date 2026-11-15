@@ -150,7 +150,7 @@ mod tests {
     fn test_mod_checksum() {
         let data = vec![1, 2, 3, 4, 5];
         let checksum = calculate_mod_checksum(&data, 256);
-        assert_eq!(checksum, ((1u16 + 2 + 3 + 4 + 5) % 256) as u8);
+        assert_eq!(checksum, (1u16 + 2 + 3 + 4 + 5) as u8);
     }
 
     #[test]
