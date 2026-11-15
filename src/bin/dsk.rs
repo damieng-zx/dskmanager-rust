@@ -430,8 +430,8 @@ fn main() {
                             } else {
                                 // Always show all columns including Usr and Del
                                 println!(
-                                    "{:<14} {:>3} {:>3} {:>4} {:>5} {:>7} {:>3} {:>3} {:<8} {:>3} {}",
-                                    "Name", "Idx", "Usr", "Blks", "Alloc", "Size", "Att", "Del", "Header", "Chk", "Meta"
+                                    "{:<14} {:>3} {:>3} {:>4} {:>5} {:>7} {:>3} {:>3} {:<8} {:>3} Meta",
+                                    "Name", "Idx", "Usr", "Blks", "Alloc", "Size", "Att", "Del", "Header", "Chk"
                                 );
                                 println!("{}", "-".repeat(96));
 
@@ -986,9 +986,8 @@ fn parse_command_line(input: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;
-    let mut chars = input.chars().peekable();
 
-    while let Some(ch) = chars.next() {
+    for ch in input.chars() {
         match ch {
             '"' => {
                 in_quotes = !in_quotes;
@@ -1165,7 +1164,7 @@ fn list_sectors_on_track(image: &DiskImage, side: u8, track: u8) {
 }
 
 fn list_all_sectors(image: &DiskImage) {
-    for (_side_idx, disk) in image.disks().iter().enumerate() {
+    for disk in image.disks().iter() {
         for track in disk.tracks() {
             println!(
                 "{:<6} {:<6} {:<6} {:<6} {:<12} {:<10} {:<10} {:<12}",
@@ -1524,6 +1523,23 @@ mod sector_edit_tests {
         assert!(image.read_sector(0, 0, 0xC1).unwrap().iter().all(|&b| b == 0xE5));
         assert_eq!(parse_hex_or_dec("0xC1"), Some(0xC1));
         assert!(parse_sector_address(&["x".into(), "0".into(), "oops".into(), "0xC1".into()]).is_err());
+    }
+
+    #[test]
+    fn parse_command_line_splits_on_whitespace_and_respects_quotes() {
+        // The REPL tokeniser must keep quoted paths whole and drop empty runs.
+        assert_eq!(parse_command_line("open game.dsk"), vec!["open", "game.dsk"]);
+        assert_eq!(
+            parse_command_line("open \"my disk.dsk\""),
+            vec!["open", "my disk.dsk"]
+        );
+        assert_eq!(
+            parse_command_line("  save\tout.dsk  "),
+            vec!["save", "out.dsk"]
+        );
+        assert!(parse_command_line("   ").is_empty());
+        // An unterminated quote still yields the accumulated text.
+        assert_eq!(parse_command_line("open \"half"), vec!["open", "half"]);
     }
 }
 

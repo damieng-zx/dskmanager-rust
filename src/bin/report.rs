@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use dskmanager::*;
 
 thread_local! {
-    static CURRENT_FILE: RefCell<String> = RefCell::new(String::new());
+    static CURRENT_FILE: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 fn set_current_file(path: &str) {
