@@ -354,21 +354,19 @@ fn write_track(file: &mut File, track: &crate::image::Track, track_size: usize) 
             )));
         }
 
-        // The stored length and the declared data length must agree. Mutating
-        // a sector through data_mut() can leave data_length stale, and writing
-        // it anyway silently dropped or misaligned data.
-        if sector.actual_size() != sector.data().len() {
-            return Err(crate::error::DskError::invalid_format(format!(
-                "Sector {} on track {} side {} has {} bytes but declares {}",
-                sector.id.sector, track.track_number, track.side_number,
-                sector.data().len(), sector.actual_size()
-            )));
-        }
-
         // Calculate stored size based on DSK format rules
         let max_stored = fdc_size_to_stored_bytes(sector.id.size_code);
         let sector_data = sector.data();
-        let stored_len = sector_data.len().min(max_stored);
+        // A sector holding more than its size code can describe cannot be
+        // written faithfully. Refuse rather than truncating the tail silently.
+        if sector_data.len() > max_stored {
+            return Err(crate::error::DskError::invalid_format(format!(
+                "Sector {} on track {} side {} holds {} bytes but its FDC size code {} stores at most {}",
+                sector.id.sector, track.track_number, track.side_number,
+                sector_data.len(), sector.id.size_code, max_stored
+            )));
+        }
+        let stored_len = sector_data.len();
 
         // Write data length for extended format
         let data_len_bytes = (stored_len as u16).to_le_bytes();

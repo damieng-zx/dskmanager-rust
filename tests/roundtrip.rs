@@ -154,7 +154,7 @@ fn assert_images_match(a: &DiskImage, b: &DiskImage, ctx: &str) {
                 assert_eq!(sa.id.size_code, sb.id.size_code, "{sctx}: id.size_code");
                 assert_eq!(sa.fdc_status1.0, sb.fdc_status1.0, "{sctx}: fdc_status1");
                 assert_eq!(sa.fdc_status2.0, sb.fdc_status2.0, "{sctx}: fdc_status2");
-                assert_eq!(sa.data_length, sb.data_length, "{sctx}: data_length");
+                assert_eq!(sa.data_length(), sb.data_length(), "{sctx}: data_length");
                 assert_eq!(sa.data(), sb.data(), "{sctx}: data");
             }
         }

@@ -65,8 +65,6 @@ pub struct Sector {
     pub fdc_status1: FdcStatus1,
     /// FDC Status Register 2
     pub fdc_status2: FdcStatus2,
-    /// Actual data length (may differ from advertised size in extended format)
-    pub data_length: u16,
     /// Sector data
     data: Vec<u8>,
 }
@@ -79,19 +77,16 @@ impl Sector {
             id,
             fdc_status1: FdcStatus1::new(0),
             fdc_status2: FdcStatus2::new(0),
-            data_length: size as u16,
             data: vec![0xE5; size], // Default CP/M filler byte
         }
     }
 
     /// Create a new sector with specific data
     pub fn with_data(id: SectorId, data: Vec<u8>) -> Self {
-        let data_length = data.len() as u16;
         Self {
             id,
             fdc_status1: FdcStatus1::new(0),
             fdc_status2: FdcStatus2::new(0),
-            data_length,
             data,
         }
     }
@@ -103,12 +98,10 @@ impl Sector {
         fdc_status2: FdcStatus2,
         data: Vec<u8>,
     ) -> Self {
-        let data_length = data.len() as u16;
         Self {
             id,
             fdc_status1,
             fdc_status2,
-            data_length,
             data,
         }
     }
@@ -125,7 +118,6 @@ impl Sector {
 
     /// Set the sector data
     pub fn set_data(&mut self, data: Vec<u8>) {
-        self.data_length = data.len() as u16;
         self.data = data;
     }
 
@@ -146,7 +138,16 @@ impl Sector {
 
     /// Get the actual data size
     pub fn actual_size(&self) -> usize {
-        self.data_length as usize
+        self.data.len()
+    }
+
+    /// Actual data length as stored in the sector info block.
+    ///
+    /// This is always the buffer length: keeping a separate field allowed the
+    /// two to disagree, which produced images whose size table did not match
+    /// their contents.
+    pub fn data_length(&self) -> u16 {
+        self.data.len() as u16
     }
 
     /// Check if the actual size matches the advertised size
@@ -183,7 +184,6 @@ impl Sector {
     /// Resize the sector data
     pub fn resize(&mut self, new_size: usize, fill_byte: u8) {
         self.data.resize(new_size, fill_byte);
-        self.data_length = new_size as u16;
     }
 }
 
@@ -264,10 +264,10 @@ mod tests {
     }
 
     #[test]
-    fn test_data_mut_length_change_does_not_corrupt_the_track() {
-        // Growing a sector's buffer through data_mut leaves data_length stale,
-        // and the writer silently discards the extra bytes. Either preserve the
-        // data or report the inconsistency; never drop it without notice.
+    fn test_data_mut_length_cannot_desynchronise() {
+        // data_length used to be a separate field, so mutating the buffer through
+        // data_mut() left it stale and the DSK writer silently dropped the extra
+        // bytes. It is now derived from the buffer, so the two cannot disagree.
         use crate::format::DiskImageFormat;
 
         let mut image = crate::image::DiskImage::builder()
@@ -276,32 +276,31 @@ mod tests {
             .sectors_per_track(1)
             .build()
             .unwrap();
-        image
-            .get_disk_mut(0)
-            .unwrap()
-            .get_track_mut(0)
-            .unwrap()
-            .get_sector_mut(0xC1)
-            .unwrap()
-            .data_mut()
-            .extend_from_slice(&[0x99; 512]);
-        assert_eq!(image.read_sector(0, 0, 0xC1).unwrap().len(), 1024);
+        {
+            let sector = image
+                .get_disk_mut(0)
+                .unwrap()
+                .get_track_mut(0)
+                .unwrap()
+                .get_sector_mut(0xC1)
+                .unwrap();
+            sector.data_mut().extend_from_slice(&[0x99; 512]);
+            // The length follows the buffer instead of going stale.
+            assert_eq!(sector.data_length(), 1024);
+            assert_eq!(sector.actual_size(), 1024);
+        }
 
+        // A sector larger than its size code allows is now reported rather than
+        // written with its tail dropped.
         let path = std::env::temp_dir().join(format!("dskmgr_desync_{}.dsk", std::process::id()));
         let saved = image.save(&path);
-        let reloaded = crate::image::DiskImage::open(&path);
-        std::fs::remove_file(path).ok();
-
-        match (saved, reloaded) {
-            // Acceptable: refuse to write a self-inconsistent sector.
-            (Err(_), _) => {}
-            // Acceptable: write it faithfully.
-            (Ok(()), Ok(img)) => {
-                assert_eq!(img.read_sector(0, 0, 0xC1).unwrap().len(), 1024);
-            }
-            // Unacceptable: silently truncated.
-            (Ok(()), Err(e)) => panic!("save succeeded but produced an unreadable image: {e}"),
+        if path.exists() {
+            std::fs::remove_file(&path).ok();
         }
+        assert!(
+            saved.is_err(),
+            "a 1024-byte buffer in a 512-byte sector must be rejected"
+        );
     }
 
     #[test]

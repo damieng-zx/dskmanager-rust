@@ -257,7 +257,7 @@ impl JsonDiskImage {
                                 },
                                 fdc_status1: encode_hex(sector.fdc_status1.0),
                                 fdc_status2: encode_hex(sector.fdc_status2.0),
-                                data_length: sector.data_length,
+                                data_length: sector.data_length(),
                                 data: encode_data_hex(sector.data()),
                             })
                             .collect(),
