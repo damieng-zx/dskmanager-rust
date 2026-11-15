@@ -139,7 +139,8 @@ pub fn verify(image: &DiskImage) -> VerifyReport {
     check_structure(image, &mut issues);
     check_filesystem(image, &mut issues);
 
-    issues.sort_by(|a, b| b.severity.cmp(&a.severity));
+    // Errors first, then warnings, then info.
+    issues.sort_by_key(|issue| std::cmp::Reverse(issue.severity));
 
     VerifyReport { issues }
 }
@@ -796,10 +797,35 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_report_display() {        let mut report = VerifyReport { issues: vec![] };
+    fn test_verify_report_display() {
+        let mut report = VerifyReport { issues: vec![] };
         add(&mut report.issues, Severity::Error, IssueLocation::Sector(0, 0, 0xC1), "Test error");
         let s = format!("{}", report);
         assert!(s.contains("ERROR"));
         assert!(s.contains("FAILED"));
+    }
+
+    #[test]
+    fn test_verify_sorts_errors_before_warnings_before_info() {
+        // verify() sorts descending by severity so the most serious issues come
+        // first, regardless of the order the checks produced them.
+        use crate::fdc::FdcStatus1;
+
+        let mut image = DiskImage::create(FormatSpec::amstrad_data()).unwrap();
+        image
+            .get_disk_mut(0)
+            .unwrap()
+            .get_track_mut(0)
+            .unwrap()
+            .get_sector_mut(0xC1)
+            .unwrap()
+            .fdc_status1 = FdcStatus1::new(FdcStatus1::DE);
+
+        let report = verify(&image);
+        let severities: Vec<Severity> = report.issues.iter().map(|i| i.severity).collect();
+        let mut sorted = severities.clone();
+        sorted.sort_by_key(|s| std::cmp::Reverse(*s));
+        assert_eq!(severities, sorted, "issues are not ordered by severity");
+        assert_eq!(report.issues[0].severity, Severity::Error);
     }
 }

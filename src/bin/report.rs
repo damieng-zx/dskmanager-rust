@@ -365,7 +365,7 @@ pub fn run(args: &[String]) -> i32 {
 
             // Sort entries within each section by title for stable output.
             for entries in sections.values_mut() {
-                entries.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+                entries.sort_by_key(|entry| entry.title.to_lowercase());
             }
 
             if write_markdown(&mut writer, &root, &sections, &counts).is_err() {
