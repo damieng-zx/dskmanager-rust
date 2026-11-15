@@ -622,7 +622,7 @@ fn get_token_text(token: u8) -> Result<&'static str> {
         0xFC => Ok("OR"),
         0xFD => Ok("XOR"),
         0xFE => Ok("NOT"),
-        _ => Err(DskError::filesystem(&format!("Unknown BASIC token: 0x{:02X}", token))),
+        _ => Err(DskError::filesystem(format!("Unknown BASIC token: 0x{:02X}", token))),
     }
 }
 
@@ -685,7 +685,7 @@ fn get_token_text_ff_prefix(token: u8) -> Result<&'static str> {
         0x7D => Ok("TESTR"),
         0x7E => Ok("COPYCHR$"),
         0x7F => Ok("VPOS"),
-        _ => Err(DskError::filesystem(&format!("Unknown BASIC token with FF prefix: 0x{:02X}", token))),
+        _ => Err(DskError::filesystem(format!("Unknown BASIC token with FF prefix: 0x{:02X}", token))),
     }
 }
 

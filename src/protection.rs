@@ -533,7 +533,7 @@ fn resolve_16sector(disk: &Disk, t0: &Track) -> Option<ProtectionResult> {
                         .collect();
                     let cleaned = extracted.trim().to_lowercase();
                     if cleaned.starts_with("discsys") && cleaned.len() > 8 {
-                        reason = format!("{} ({})", reason, &cleaned[8..].trim());
+                        reason = format!("{} ({})", reason, cleaned[8..].trim());
                     } else if cleaned.starts_with("multi-") {
                         reason = format!("{} ({})", reason, cleaned);
                     }

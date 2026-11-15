@@ -55,7 +55,7 @@ pub fn read_trd<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
 
     let file_len = file.metadata()?.len() as usize;
     if file_len == 0 || file_len > TRD_MAX_FILE_SIZE {
-        return Err(DskError::invalid_format(&format!(
+        return Err(DskError::invalid_format(format!(
             "TRD file has unexpected size {} bytes (max {})",
             file_len,
             TRD_MAX_FILE_SIZE

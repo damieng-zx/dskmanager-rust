@@ -353,15 +353,15 @@ impl<'a> MgtFileSystem<'a> {
             };
 
             let disk = self.image.get_disk(side).ok_or_else(|| {
-                DskError::filesystem(&format!("No disk side {}", side))
+                DskError::filesystem(format!("No disk side {}", side))
             })?;
 
             let track = disk.get_track(phys_track).ok_or_else(|| {
-                DskError::filesystem(&format!("Track {} not found", phys_track))
+                DskError::filesystem(format!("Track {} not found", phys_track))
             })?;
 
             let sector = track.get_sector(current_sector).ok_or_else(|| {
-                DskError::filesystem(&format!(
+                DskError::filesystem(format!(
                     "Sector {} not found on track {}",
                     current_sector, phys_track
                 ))

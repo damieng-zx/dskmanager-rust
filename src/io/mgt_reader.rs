@@ -56,7 +56,7 @@ pub fn read_mgt<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
     // Check file size
     let metadata = file.metadata()?;
     if metadata.len() != MGT_FILE_SIZE as u64 {
-        return Err(DskError::invalid_format(&format!(
+        return Err(DskError::invalid_format(format!(
             "MGT file should be {} bytes, got {}",
             MGT_FILE_SIZE,
             metadata.len()
@@ -154,5 +154,15 @@ mod tests {
             * MGT_SECTORS_PER_TRACK as usize
             * MGT_SECTOR_SIZE as usize;
         assert_eq!(expected_size, MGT_FILE_SIZE);
+    }
+
+    #[test]
+    fn test_wrong_size_reports_both_sizes() {
+        let path = std::env::temp_dir().join(format!("dskmgr_short_{}.mgt", std::process::id()));
+        std::fs::write(&path, vec![0u8; 1000]).unwrap();
+        let error = read_mgt(&path).unwrap_err().to_string();
+        std::fs::remove_file(&path).ok();
+        assert!(error.contains("819200"), "error should name the expected size: {error}");
+        assert!(error.contains("1000"), "error should name the actual size: {error}");
     }
 }

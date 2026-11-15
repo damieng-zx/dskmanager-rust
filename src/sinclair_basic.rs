@@ -367,7 +367,7 @@ fn get_token_text(token: u8, _mode: SinclairBasicMode) -> Result<&'static str> {
         0xFD => Ok("CLEAR"),
         0xFE => Ok("RETURN"),
         0xFF => Ok("COPY"),
-        _ => Err(DskError::filesystem(&format!("Unknown BASIC token: 0x{:02X}", token))),
+        _ => Err(DskError::filesystem(format!("Unknown BASIC token: 0x{:02X}", token))),
     }
 }
 
