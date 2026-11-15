@@ -411,13 +411,26 @@ impl<'a> MgtFileSystem<'a> {
                 index: dir_entry.index,
                 blocks: dir_entry.sectors_used as usize,
                 allocated: dir_entry.file_size(),
-                size: dir_entry.file_size(),
+                size: self.recorded_file_size(dir_entry),
                 attributes: dir_entry.attributes(),
                 header,
             });
         }
 
         Ok(entries)
+    }
+
+    /// Actual file length. Disciple/+D store it at 0xD4; when that field is
+    /// absent or zero the whole allocation is in use.
+    fn recorded_file_size(&self, entry: &MgtDirEntry) -> usize {
+        let raw = &entry.raw_data;
+        if raw.len() >= 214 {
+            let recorded = u16::from_le_bytes([raw[212], raw[213]]) as usize;
+            if recorded > 0 && recorded <= entry.file_size() {
+                return recorded;
+            }
+        }
+        entry.file_size()
     }
 
     /// Parse file metadata - can be overridden by subclasses
@@ -576,6 +589,44 @@ mod tests {
         assert_eq!(entry.start_sector, 1);
         assert!(!entry.hidden);
         assert!(!entry.protected);
+    }
+
+    #[test]
+    fn test_read_dir_extended_reports_recorded_file_size() {
+        // The listing reported the allocation as both `size` and `allocated`,
+        // so a 300-byte file occupying one 512-byte sector listed as 512 bytes.
+        let mut data = vec![0u8; 512];
+        data[0] = 0x13; // CODE
+        data[1..11].copy_from_slice(b"TESTFILE  ");
+        data[11..13].copy_from_slice(&1u16.to_be_bytes()); // 1 sector
+        data[13] = 4; // start track
+        data[14] = 1; // start sector
+        // Disciple/+D record the true file length at 0xD4.
+        data[212..214].copy_from_slice(&300u16.to_le_bytes());
+
+        let image = DiskImage::builder()
+            .format(crate::format::DiskImageFormat::RawMgt)
+            .spec(crate::format::FormatSpec::new(2, 80, 10, 512).with_first_sector_id(1))
+            .build()
+            .unwrap();
+        let mut image = image;
+        // Zero the directory area so only our entry is present.
+        for track in 0..4u8 {
+            for id in 1..=10u8 {
+                image.write_sector(0, track, id, &[0u8; 512]).unwrap();
+            }
+        }
+        image.write_sector(0, 0, 1, &data).unwrap();
+        // Deliberately does not write the sector the file claims to occupy.
+
+        let fs = MgtFileSystem::new(&image).unwrap();
+        let entries = fs.read_dir_extended().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].blocks, 1);
+        // One 512-byte sector is allocated, but the entry records a 300-byte
+        // file. Reporting the allocation as the size overstates it.
+        assert_eq!(entries[0].allocated, 512);
+        assert_eq!(entries[0].size, 300);
     }
 
     #[test]
