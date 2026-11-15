@@ -726,7 +726,7 @@ impl CpmFileSystem<'_> {
     /// # Arguments
     /// * `name` - Filename to read (prefix with `N:` to select CP/M user N; defaults to user 0)
     /// * `include_header` - If true, returns raw data including AMSDOS/PLUS3DOS headers if present.
-    ///                      If false, strips headers and returns only file data.
+    ///   If false, strips headers and returns only file data.
     pub fn read_file_binary(&self, name: &str, include_header: bool) -> Result<Vec<u8>> {
         let files = self.merge_extents();
 
