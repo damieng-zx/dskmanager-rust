@@ -280,7 +280,8 @@ fn trdos_import(image: &mut DiskImage, name: &str, data: &[u8]) -> Result<()> {
     let fs = TrdosFileSystem::new(image)?;
     let catalog = fs.catalog().filter(|_| image.read_sector(0,0,9).map(|s| s.get(231) == Some(&0x10)).unwrap_or(false)).cloned()
         .ok_or_else(|| DskError::filesystem("Format the TR-DOS disk before importing"))?;
-    if fs.directory().iter().any(|e| !e.deleted && e.filename.eq_ignore_ascii_case(base)) {
+    if fs.directory().iter().any(|e| !e.deleted && e.filename.eq_ignore_ascii_case(base)
+        && e.file_type.to_byte().eq_ignore_ascii_case(&type_byte)) {
         return Err(DskError::filesystem("File already exists"));
     }
     let count = data.len().div_ceil(256);
@@ -319,11 +320,20 @@ fn trdos_import(image: &mut DiskImage, name: &str, data: &[u8]) -> Result<()> {
 
 fn trdos_delete(image: &mut DiskImage, name: &str) -> Result<()> {
     let fs = TrdosFileSystem::new(image)?;
-    let (base, _) = name.rsplit_once('.').unwrap_or((name, ""));
-    if !fs.directory().iter().any(|e| !e.deleted && e.filename.eq_ignore_ascii_case(base)) {
+    // TR-DOS identifies a file by name *and* type byte: NAME.C and NAME.B are
+    // distinct files and only the requested one is removed.
+    let (base, file_type) = name.rsplit_once('.').unwrap_or((name, "C"));
+    let type_byte = match file_type.to_ascii_uppercase().as_str() {
+        "B" => b'B', "C" => b'C', "D" => b'D', "#" => b'#',
+        _ => return Err(DskError::InvalidFilename(name.to_string())),
+    };
+    let matches = |e: &crate::filesystem::TrdosDirEntry| {
+        !e.deleted && e.filename.eq_ignore_ascii_case(base) && e.file_type.to_byte().eq_ignore_ascii_case(&type_byte)
+    };
+    if !fs.directory().iter().any(matches) {
         return Err(DskError::FileNotFound(name.to_string()));
     }
-    let survivors: Result<Vec<_>> = fs.directory().iter().filter(|e| !e.deleted && !e.filename.eq_ignore_ascii_case(base))
+    let survivors: Result<Vec<_>> = fs.directory().iter().filter(|e| !e.deleted && !matches(e))
         .map(|e| Ok((e.filename.clone(), e.file_type.to_byte(), e.param1, fs.read_file_data(e)?))).collect();
     let survivors = survivors?;
     // Preserve the disk type and all non-filesystem sectors; reset the directory
@@ -338,7 +348,10 @@ fn trdos_delete(image: &mut DiskImage, name: &str) -> Result<()> {
         let suffix = kind as char;
         trdos_import(image, &format!("{}.{}", base, suffix), &bytes)?;
         let fs = TrdosFileSystem::new(image)?;
-        let index = fs.directory().iter().find(|e| e.filename.eq_ignore_ascii_case(&base) && !e.deleted).unwrap().index;
+        let index = fs.directory().iter()
+            .find(|e| e.filename.eq_ignore_ascii_case(&base) && e.file_type.to_byte() == kind && !e.deleted)
+            .ok_or_else(|| DskError::filesystem("Lost a file while repacking the TR-DOS directory"))?
+            .index;
         let id = (index / 16 + 1) as u8;
         let mut sector = image.read_sector(0,0,id)?.to_vec();
         sector[(index % 16)*16 + 11..(index % 16)*16 + 13].copy_from_slice(&param.to_le_bytes());
@@ -350,7 +363,7 @@ fn trdos_delete(image: &mut DiskImage, name: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::filesystem::{CpmFileSystem, FileSystem};
+    use crate::filesystem::{format_filesystem, CpmFileSystem, FileSystem};
     use crate::format::{DiskImageFormat, FormatSpec};
 
     #[test]
@@ -380,6 +393,64 @@ mod tests {
         delete_file(&mut image, FileSystemType::Mgt, "TESTFILE").unwrap();
         assert!(MgtFileSystem::new(&image).unwrap().find_file("TESTFILE").is_none());
         import_file(&mut image, FileSystemType::Mgt, "TESTFILE", &data).unwrap();
+    }
+
+    #[test]
+    fn trdos_delete_keeps_files_with_other_types() {
+        // TR-DOS treats NAME.C and NAME.B as different files. Deleting by base
+        // name matched both and removed them together.
+        let mut image = DiskImage::builder().format(DiskImageFormat::RawTrd)
+            .spec(FormatSpec::trdos()).build().unwrap();
+        format_filesystem(&mut image, FileSystemType::Trdos).unwrap();
+
+        let mut sector = image.read_sector(0, 0, 1).unwrap().to_vec();
+        sector[..8].copy_from_slice(b"FOO     ");
+        sector[8] = b'C';
+        sector[9..11].copy_from_slice(&256u16.to_le_bytes());
+        sector[13] = 1;
+        sector[14] = 0; // start sector (0-based)
+        sector[15] = 1; // start track
+        sector[16..24].copy_from_slice(b"FOO     ");
+        sector[24] = b'B';
+        sector[25..27].copy_from_slice(&256u16.to_le_bytes());
+        sector[29] = 1;
+        sector[30] = 0; // start sector (0-based)
+        sector[31] = 2; // start track
+        image.write_sector(0, 0, 1, &sector).unwrap();
+        image.write_sector(0, 1, 1, &[0x11; 256]).unwrap();
+        image.write_sector(0, 2, 1, &[0x22; 256]).unwrap();
+
+        delete_file(&mut image, FileSystemType::Trdos, "FOO.C").unwrap();
+
+        let remaining: Vec<String> = TrdosFileSystem::new(&image)
+            .unwrap()
+            .directory()
+            .iter()
+            .filter(|e| !e.deleted)
+            .map(|e| format!("{}.{}", e.filename, e.file_type.to_byte() as char))
+            .collect();
+        assert_eq!(remaining, vec!["FOO.B".to_string()]);
+        assert_eq!(TrdosFileSystem::new(&image).unwrap().read_file("FOO").unwrap(), vec![0x22; 256]);
+    }
+
+    #[test]
+    fn trdos_import_allows_other_type_of_same_name() {
+        // NAME.C and NAME.B are distinct TR-DOS files, so importing the second
+        // must not be rejected as a duplicate.
+        let mut image = DiskImage::builder().format(DiskImageFormat::RawTrd)
+            .spec(FormatSpec::trdos()).build().unwrap();
+        format_filesystem(&mut image, FileSystemType::Trdos).unwrap();
+        import_file(&mut image, FileSystemType::Trdos, "BAR.C", &[0x11; 256]).unwrap();
+        import_file(&mut image, FileSystemType::Trdos, "BAR.B", &[0x22; 256]).unwrap();
+
+        let types: Vec<u8> = TrdosFileSystem::new(&image)
+            .unwrap()
+            .directory()
+            .iter()
+            .filter(|e| !e.deleted)
+            .map(|e| e.file_type.to_byte())
+            .collect();
+        assert_eq!(types, vec![b'C', b'B']);
     }
 
     #[test]
