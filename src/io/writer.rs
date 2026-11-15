@@ -117,7 +117,8 @@ fn write_td0(file: &mut File, image: &DiskImage) -> Result<()> {
     header[6] = if image.spec.num_tracks > 40 { 3 } else { 1 };
     header[7] = 0; // single-step, no comment block
     header[8] = 0; // include all sectors
-    header[9] = side_count;
+    // Byte 9 is the number of sides minus one.
+    header[9] = side_count - 1;
     let header_crc = crate::io::td0_reader::teledisk_crc(&header[..10]);
     header[10..12].copy_from_slice(&header_crc.to_le_bytes());
     file.write_all(&header)?;
@@ -512,6 +513,28 @@ mod tests {
             std::fs::remove_file(&path).ok();
         }
         assert!(saved.is_err(), "a 16 KB sector cannot be stored in a DSK");
+    }
+
+    #[test]
+    fn test_td0_header_records_sides_minus_one() {
+        // The TeleDisk header stores the number of sides minus one. The writer
+        // stored the side count, so external tools read a 2-sided image as
+        // 3-sided.
+        let mut image = DiskImage::builder()
+            .format(DiskImageFormat::RawTd0)
+            .num_sides(2)
+            .num_tracks(1)
+            .sectors_per_track(2)
+            .sector_size(512)
+            .build()
+            .unwrap();
+        image.write_sector(0, 0, 0xC1, &[0x11; 512]).unwrap();
+
+        let path = std::env::temp_dir().join(format!("dskmgr_td0_hdr_{}.td0", std::process::id()));
+        write_dsk(&image, &path).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(bytes[9], 1, "two sides must be recorded as sides - 1");
     }
 
     #[test]

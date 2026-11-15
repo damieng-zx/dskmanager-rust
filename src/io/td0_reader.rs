@@ -71,7 +71,8 @@ pub fn read_td0<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
         cursor = parse_comment(&image_data, &mut cursor, &mut warnings)?;
     }
 
-    let declared_sides = header[9].clamp(1, 2);
+    // Byte 9 stores the number of sides minus one.
+    let declared_sides = (header[9] + 1).clamp(1, 2);
     let mut tracks: Vec<(u8, u8, Track)> = Vec::new();
     let mut max_track = 0u8;
 
@@ -713,7 +714,8 @@ mod tests {
 
     #[test]
     fn test_uncompressed_td0_image() {
-        let mut image = vec![b'T', b'D', 0, 0, 15, 0, 1, 0, 0, 1, 0, 0];
+        // Header byte 9 is the number of sides minus one: 0 = one side.
+        let mut image = vec![b'T', b'D', 0, 0, 15, 0, 1, 0, 0, 0, 0, 0];
         let header_crc = teledisk_crc(&image[..10]).to_le_bytes();
         image[10..12].copy_from_slice(&header_crc);
 
