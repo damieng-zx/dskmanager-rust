@@ -82,7 +82,13 @@ pub(super) fn cpm_address(image: &DiskImage, spec: &DiskSpecification, absolute:
     Ok((side as u8, track as u8, id))
 }
 
-fn cpm_directory(image: &DiskImage, spec: &DiskSpecification) -> Result<(Vec<(u8,u8,u8)>, Vec<u8>)> {
+/// A CP/M sector address: (side, track, sector ID).
+type SectorAddress = (u8, u8, u8);
+
+/// An on-disk CP/M directory: the sector list it occupies plus its raw bytes.
+type CpmDirectory = (Vec<SectorAddress>, Vec<u8>);
+
+fn cpm_directory(image: &DiskImage, spec: &DiskSpecification) -> Result<CpmDirectory> {
     let size = spec.directory_entries() * 32;
     if size == 0 || spec.sector_size == 0 || !size.is_multiple_of(spec.sector_size as usize) {
         return Err(DskError::filesystem("Invalid CP/M directory geometry"));
