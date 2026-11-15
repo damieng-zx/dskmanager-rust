@@ -186,7 +186,16 @@ impl DiskImage {
                 id: sector_id,
             })?;
 
-        // Resize sector data if needed
+        // The buffer must match the sector's advertised size. Silently resizing
+        // left the FDC size code describing different data than was stored, so
+        // an image no longer round-tripped through its own format.
+        let advertised = sector.advertised_size();
+        if data.len() != advertised {
+            return Err(DskError::invalid_format(format!(
+                "Sector {} on track {} side {} is {} bytes but {} bytes were supplied",
+                sector_id, track, side, advertised, data.len()
+            )));
+        }
         if data.len() != sector.data().len() {
             sector.resize(data.len(), 0);
         }
@@ -447,6 +456,24 @@ mod tests {
 
         assert_eq!(image.total_capacity(), 2 * 40 * 9 * 512);
         assert_eq!(image.total_capacity() / 1024, 360);
+    }
+
+    #[test]
+    fn test_write_sector_rejects_size_that_contradicts_size_code() {
+        // Writing a buffer that disagrees with the sector's FDC size code left
+        // the sector storing more bytes than it advertises, so a saved image
+        // no longer matched its own geometry.
+        let mut image = DiskImage::builder()
+            .num_tracks(1)
+            .sectors_per_track(1)
+            .build()
+            .unwrap();
+
+        let result = image.write_sector(0, 0, 0xC1, &[0x42; 1024]);
+        assert!(result.is_err(), "1024 bytes must not fit a 512-byte sector");
+
+        // The sector is untouched after the rejected write.
+        assert_eq!(image.read_sector(0, 0, 0xC1).unwrap().len(), 512);
     }
 
     #[test]
