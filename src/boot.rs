@@ -64,8 +64,9 @@ impl BootDetection {
             };
         }
 
-        // Need sector 1 for mod checks
-        let sector1 = match track.get_sector_by_index(1) {
+        // Need the first logical sector (lowest ID) for the mod checks, matching
+        // the sector the format detector examines.
+        let first_logical = match track.sectors().iter().min_by_key(|s| s.id.sector) {
             Some(s) => s,
             None => {
                 return BootDetection {
@@ -75,8 +76,8 @@ impl BootDetection {
             }
         };
 
-        // Calculate mod 256 checksum of sector 1's data
-        let mod256 = calculate_mod_checksum(sector1.data(), 256);
+        // Calculate mod 256 checksum of the first logical sector's data
+        let mod256 = calculate_mod_checksum(first_logical.data(), 256);
 
         // Determine system based on checksum
         let (system, reason) = match mod256 {
@@ -142,7 +143,7 @@ fn calculate_mod_checksum(data: &[u8], mod_value: usize) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::format::FormatSpec;
+    use crate::format::{DiskSpecification, FormatSpec};
     use crate::image::DiskImageBuilder;
 
     #[test]
@@ -160,6 +161,37 @@ mod tests {
     }
 
     #[test]
+    fn test_boot_detection_uses_first_logical_sector() {
+        // The spec detector checksums the lowest-ID sector of track 0, but boot
+        // detection checksummed the second physical sector. When the two differ
+        // the disk is identified by one and called unbootable by the other.
+        let mut image = DiskImageBuilder::new()
+            .spec(FormatSpec::spectrum_plus3())
+            .build()
+            .unwrap();
+
+        let mod256 = |d: &[u8]| d.iter().map(|&b| b as usize).sum::<usize>() % 256;
+        let disk = image.get_disk_mut(0).unwrap();
+        let track = disk.get_track_mut(0).unwrap();
+
+        // First logical sector (ID 1) -> 3 mod 256, touching a byte past the
+        // spec block so the blank-format fallback still applies.
+        let sector1 = track.get_sector_mut(1).unwrap();
+        let delta = (3 + 256 - mod256(sector1.data())) % 256;
+        let byte = &mut sector1.data_mut()[100];
+        *byte = byte.wrapping_add(delta as u8);
+        // Second sector (ID 2) -> anything but 3.
+        let sector2 = track.get_sector_mut(2).unwrap();
+        if mod256(sector2.data()) == 3 {
+            sector2.data_mut()[100] = sector2.data()[100].wrapping_add(1);
+        }
+
+        assert_eq!(DiskSpecification::identify(&image).format, "Amstrad PCW/+3 DD/SS/ST (Assumed)");
+        let detection = BootDetection::detect(&image);
+        assert_eq!(detection.system, "Spectrum +3", "reason: {}", detection.reason);
+    }
+
+    #[test]
     fn test_boot_detection_spectrum_plus3() {
         let mut image = DiskImageBuilder::new()
             .num_sides(1)
@@ -173,21 +205,15 @@ mod tests {
         let disk = image.get_disk_mut(0).unwrap();
         let track = disk.get_track_mut(0).unwrap();
 
-        // Modify sector 0 (index 0) - fill with varied data
+        // The checksum is taken over the first logical sector (lowest ID), which
+        // is sector index 0 here.
         if let Some(sector0) = track.get_sector_by_index_mut(0) {
+            // Fill with varied data
             for (i, byte) in sector0.data_mut().iter_mut().enumerate() {
                 *byte = (i % 256) as u8;
             }
-        }
-
-        // Modify sector 1 (index 1) - set checksum to 3
-        if let Some(sector1) = track.get_sector_by_index_mut(1) {
-            // Fill with varied data
-            for (i, byte) in sector1.data_mut().iter_mut().enumerate() {
-                *byte = (i % 256) as u8;
-            }
             // Calculate current sum mod 256
-            let current_sum: usize = sector1.data().iter().map(|&b| b as usize).sum();
+            let current_sum: usize = sector0.data().iter().map(|&b| b as usize).sum();
             let current_mod = current_sum % 256;
             // Adjust to get mod 256 = 3
             let adjustment = if current_mod <= 3 {
@@ -196,7 +222,7 @@ mod tests {
                 256 + 3 - current_mod
             };
             // Add adjustment to first byte (wrapping if needed)
-            sector1.data_mut()[0] = sector1.data()[0].wrapping_add(adjustment as u8);
+            sector0.data_mut()[0] = sector0.data()[0].wrapping_add(adjustment as u8);
         }
 
         let detection = BootDetection::detect(&image);
