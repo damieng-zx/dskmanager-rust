@@ -11,8 +11,11 @@ pub const TRACK_INFO_MARKER: &[u8] = b"Track-Info\r\n";
 /// Offset-Info block marker (V5 extension)
 pub const OFFSET_INFO_MARKER: &[u8] = b"Offset-Info\r\n";
 
-/// Creator signature for this library
-pub const CREATOR_SIGNATURE: &[u8] = b"dskmanager v0.1\0\0";
+/// Creator signature for this library.
+///
+/// The DSK creator field is 14 bytes, so this must be exactly that long; a
+/// longer literal is silently truncated mid-version.
+pub const CREATOR_SIGNATURE: &[u8] = b"dskmanager 0.2";
 
 /// Maximum number of tracks per side
 pub const MAX_TRACKS: usize = 204;
@@ -128,6 +131,18 @@ pub const DISK_INFO_EXT_TRACK_SIZE_OFFSET: usize = 0x34;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_creator_signature_fits_the_creator_field() {
+        // The DSK creator field is 14 bytes; anything longer is truncated when
+        // written, which silently cut the version number short.
+        assert_eq!(
+            CREATOR_SIGNATURE.len(),
+            14,
+            "must fill the creator field exactly"
+        );
+        assert!(CREATOR_SIGNATURE.starts_with(b"dskmanager "));
+    }
 
     #[test]
     fn test_fdc_size_to_bytes() {

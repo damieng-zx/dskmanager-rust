@@ -13,33 +13,27 @@ A Rust library for reading and writing DSK disk image files with CP/M filesystem
 ## Quick Start
 
 ```rust,no_run
-use dskmanager::{DiskImage, FormatSpec, FileSystem, CpmFileSystem};
+use dskmanager::{AnyFileSystem, DiskImage, FileSystemType, FormatSpec};
 
-// Open an existing DSK file
+// Open an existing image and read a sector
 let mut image = DiskImage::open("disk.dsk")?;
-
-// Read a sector
 let data = image.read_sector(0, 0, 0xC1)?;
+println!("sector holds {} bytes", data.len());
 
-// Write a sector
+// Write a sector and save
 let new_data = vec![0xE5; 512];
 image.write_sector(0, 0, 0xC1, &new_data)?;
-
-// Save changes
 image.save("disk.dsk")?;
 
-// Create a new DSK
-let spec = FormatSpec::amstrad_data();
-let new_image = DiskImage::create(spec)?;
-
-// Mount CP/M filesystem
-let fs = CpmFileSystem::from_image(&image)?;
-for entry in fs.read_dir()? {
+// Mount the image's filesystem (Auto picks CP/M, MGT or TR-DOS)
+let fs = AnyFileSystem::mount(&image, FileSystemType::Auto)?;
+for entry in fs.read_dir_extended()? {
     println!("{}: {} bytes", entry.name, entry.size);
 }
-
-// Read a file
 let contents = fs.read_file("README.TXT")?;
+
+// Create a new blank image
+let new_image = DiskImage::create(FormatSpec::amstrad_data())?;
 # Ok::<(), dskmanager::DskError>(())
 ```
 
@@ -93,9 +87,9 @@ pub use boot::BootDetection;
 pub use error::{DskError, Result};
 pub use fdc::{FdcStatus1, FdcStatus2};
 pub use filesystem::{
-    CpmFileSystem, DirEntry, DiscipleFileSystem, ExtendedDirEntry, FileAttributes, FileHeader,
-    FileSystem, FileSystemInfo, FileSystemType, HeaderType, MgtDirEntry, MgtFileSystem, MgtFileType,
-    MgtSystemType, SamFileSystem,
+    AnyFileSystem, CpmFileSystem, DirEntry, DiscipleFileSystem, ExtendedDirEntry, FileAttributes,
+    FileHeader, FileSystem, FileSystemInfo, FileSystemType, HeaderType, MgtDirEntry, MgtFileSystem,
+    MgtFileType, MgtSystemType, SamFileSystem,
 };
 pub use filesystem::try_parse_header;
 pub use format::{

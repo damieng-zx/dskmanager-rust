@@ -1,8 +1,28 @@
 # DSK Manager
 
+[![Crates.io](https://img.shields.io/crates/v/dskmanager-rust.svg)](https://crates.io/crates/dskmanager-rust)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 A command-line tool and Rust library for reading, writing, and analyzing DSK, MGT, TRD, TD0, and SCL disk files. Built for retro computing enthusiasts working with Amstrad CPC, ZX Spectrum +3/TR-DOS, Amstrad PCW, SAM Coupe, and IBM PC floppy images.
 
+## Features
+
+- **Read and write** Standard DSK, Extended DSK, raw MGT, raw TRD, TeleDisk (TD0) and SCL archives
+- **Lossless JSON** as an editable intermediate for every supported format
+- **Filesystems:** CP/M (Amstrad CPC, Spectrum +3, PCW, Tatung Einstein), MGT (DISCiPLE/+D, SAM Coupe) and TR-DOS — list, read, import, delete and format
+- **Sector-level editing:** replace, fill, and edit FDC status bytes
+- **Bulk analysis:** `dsk report` walks a collection (including inside ZIPs) and emits CSV or Markdown
+- **Copy protection detection** for 20+ Amstrad CPC and ZX Spectrum +3 schemes
+- **BASIC decoding** for AMSDOS (Locomotive) and PLUS3DOS (Sinclair) tokenised files
+- **Integrity checks:** `verify` inspects structure, FDC status and filesystem consistency
+
 ## Install
+
+```bash
+cargo install dskmanager-rust
+```
+
+Or from a checkout:
 
 ```bash
 cargo install --path .
@@ -79,10 +99,10 @@ dsk disk.json
 
 | Command | Description |
 |---------|-------------|
-| `detect-protection` | Detect copy protection schemes |
-| `disassemble [track] [sector]` | Disassemble Z80 code from a sector |
+| `detect-protection` | Detect copy protection schemes (`protection`) |
+| `disassemble [track] [sector]` | Disassemble Z80 code from a sector (`dasm`) |
 | `strings [len] [uniq] [charset]` | Search for strings in the disk image |
-| `map [side]` | Visual sector map (`▓` = in use, `░` = empty) |
+| `map [side]` | Visual sector map (▓ in use, ░ filler, red error, yellow deleted) |
 | `verify` | Verify disk structure and filesystem integrity |
 
 ## File Formats
@@ -101,7 +121,31 @@ dsk disk.json
 
 `open` and `save` detect the format from the file extension. You can open a `.dsk`, edit it, and `save` as `.json` — or vice versa. JSON files preserve all metadata (CHRN IDs, FDC status, per-sector data lengths) so the round-trip is lossless.
 
-`dsk report <directory> [output.csv|output.md]` analyzes DSK, MGT, TRD, TD0, and SCL images, including supported images inside ZIP archives.
+`saving` to an extension the image cannot be represented in (for example a CPC image as `.scl`) fails rather than writing a misleading file, and an existing file is left untouched.
+
+### Batch analysis
+
+`dsk report` walks a collection and emits one row (CSV) or section (Markdown) per disk:
+
+```bash
+dsk report ./disks report.csv
+dsk report ./disks report.md
+dsk report "C:\\disks\\*.dsk"
+```
+
+It scans DSK, MGT, TRD, TD0 and SCL images, including those inside `.zip` archives, and reports format, protection, bootability and structural quirks (unusual sector counts or sizes, FDC errors, deleted-data marks, oversized tracks).
+
+Filters combine with AND:
+
+| Filter | Meaning |
+|--------|---------|
+| `--filter-format <text>` | Substring match on the detected format |
+| `--filter-tracks <N>` | Exact track count |
+| `--filter-sides <N>` | Exact side count |
+| `--filter-sector-size <N>` | Exact sector size in bytes |
+| `--filter-protection [text]` | Any protection, or a substring of its name |
+| `--filter-has-errors` | Has FDC errors on any side |
+| `--filter-quirks` | Has non-standard characteristics |
 
 ### Disk geometry presets
 
@@ -131,22 +175,26 @@ DSK Manager is also a Rust library. Add it to your project:
 
 ```toml
 [dependencies]
-dskmanager = "0.1"
+dskmanager-rust = "0.2"
 ```
 
+The crate's library target is named `dskmanager`:
+
 ```rust
-use dskmanager::{DiskImage, FormatSpec, CpmFileSystem, FileSystem};
+use dskmanager::{AnyFileSystem, DiskImage, FileSystemType, FormatSpec};
 
+// Open an existing image and read a sector.
 let image = DiskImage::open("disk.dsk")?;
+println!("{:?}", image.read_sector(0, 0, 0xC1)?.len());
 
-let data = image.read_sector(0, 0, 0xC1)?;
-println!("Sector data: {} bytes", data.len());
-
-let fs = CpmFileSystem::from_image(&image)?;
-for entry in fs.read_dir()? {
+// Mount whichever filesystem the image uses and list its files.
+let fs = AnyFileSystem::mount(&image, FileSystemType::Auto)?;
+for entry in fs.read_dir_extended()? {
     println!("{}: {} bytes", entry.name, entry.size);
 }
+let contents = fs.read_file("README.TXT")?;
 
+// Create, edit and save.
 let mut image = DiskImage::create(FormatSpec::amstrad_data())?;
 image.write_sector(0, 0, 0xC1, &vec![0xE5; 512])?;
 image.save("new_disk.dsk")?;
@@ -163,7 +211,9 @@ Contributions welcome! Please ensure:
 1. Code compiles without warnings: `cargo build`
 2. Tests pass: `cargo test`
 3. Code is formatted: `cargo fmt`
-4. No clippy warnings: `cargo clippy`
+4. No clippy warnings: `cargo clippy --all-targets`
+
+See [CHANGELOG.md](CHANGELOG.md) for what has changed between releases.
 
 Run the test suite:
 

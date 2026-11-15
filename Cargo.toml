@@ -1,14 +1,14 @@
 [package]
 name = "dskmanager-rust"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 default-run = "dsk"
 autobins = false
 authors = ["Damien Guard"]
 description = "A Rust library for reading and writing DSK disk image files with filesystem support"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/damieng/dskmanager-rust"
-homepage = "https://github.com/damieng/dskmanager-rust"
+repository = "https://github.com/damieng-zx/dskmanager-rust"
+homepage = "https://github.com/damieng-zx/dskmanager-rust"
 readme = "README.md"
 keywords = ["dsk", "disk-image", "cpm", "amstrad", "spectrum"]
 categories = ["filesystem", "parser-implementations"]
