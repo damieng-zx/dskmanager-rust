@@ -560,9 +560,7 @@ impl<'a> LzhufDecoder<'a> {
                 }
                 next -= 1;
                 self.freq.swap(node, next);
-                let child = self.son[node];
-                self.son[node] = self.son[next];
-                self.son[next] = child;
+                self.son.swap(node, next);
                 self.parent[self.son[node]] = node;
                 if self.son[node] < 627 {
                     self.parent[self.son[node] + 1] = node;
@@ -687,6 +685,28 @@ mod tests {
     fn test_td0_extension() {
         assert!(is_td0_file("CPM3.TD0"));
         assert!(!is_td0_file("disk.dsk"));
+    }
+
+    #[test]
+    fn test_lzhuf_update_keeps_parent_links_consistent() {
+        // update() reorders nodes to keep frequencies sorted, swapping son
+        // entries and repairing parent pointers. Drive it repeatedly and check
+        // every internal node still points at its parent.
+        let mut decoder = LzhufDecoder::new(&[]);
+        for code in [b'a', b'b', b'c', b'a', b'b', b'a', b'd', b'a'] {
+            decoder.update(code as usize);
+        }
+
+        for node in 0..627usize {
+            let child = decoder.son[node];
+            if child < 627 {
+                // Internal node: both children belong to it.
+                assert_eq!(decoder.parent[child], node, "left child of node {node}");
+                assert_eq!(decoder.parent[child + 1], node, "right child of node {node}");
+            } else {
+                assert_eq!(decoder.parent[child], node, "leaf {child} of node {node}");
+            }
+        }
     }
 
     #[test]
