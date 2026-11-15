@@ -89,7 +89,7 @@ impl std::str::FromStr for FileSystemType {
 }
 
 /// File attributes
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileAttributes {
     /// Read-only flag
     pub read_only: bool,
@@ -97,16 +97,6 @@ pub struct FileAttributes {
     pub system: bool,
     /// Archive flag
     pub archive: bool,
-}
-
-impl Default for FileAttributes {
-    fn default() -> Self {
-        Self {
-            read_only: false,
-            system: false,
-            archive: false,
-        }
-    }
 }
 
 /// File header type
@@ -376,5 +366,20 @@ mod tests {
             <FileSystemType as FromStr>::from_str("TRDOS").ok(),
             Some(FileSystemType::Trdos)
         );
+    }
+}
+
+#[cfg(test)]
+mod attribute_tests {
+    use super::*;
+
+    #[test]
+    fn test_file_attributes_default_is_all_false() {
+        // Default is now derived; it must still mean "no flags set".
+        let attributes = FileAttributes::default();
+        assert!(!attributes.read_only);
+        assert!(!attributes.system);
+        assert!(!attributes.archive);
+        assert_eq!(attributes, FileAttributes::default());
     }
 }
