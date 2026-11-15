@@ -232,7 +232,10 @@ impl DiskImage {
                     _ => DiskImageFormat::ExtendedDSK,
                 }
             } else {
-                self.format
+                return Err(DskError::invalid_format(format!(
+                    "Unrecognized output extension '{}'; use .dsk, .mgt, .trd, .td0, .scl or .json",
+                    extension
+                )));
             };
 
             let mut output = self.clone();
@@ -489,6 +492,16 @@ mod tests {
         std::fs::remove_file(path).ok();
         assert_eq!(image.format(), DiskImageFormat::RawTd0);
         assert_eq!(result.unwrap().format(), DiskImageFormat::RawTd0);
+    }
+
+    #[test]
+    fn test_save_rejects_unrecognized_extension() {
+        // Saving to an unrecognised extension used to write a DSK silently, so
+        // `save x.img` produced a .dsk with no indication of what happened.
+        let mut image = DiskImage::create(FormatSpec::amstrad_data()).unwrap();
+        let path = std::env::temp_dir().join(format!("dskmgr_unk_{}.img", std::process::id()));
+        assert!(image.save(&path).is_err());
+        assert!(!path.exists());
     }
 
     #[test]
