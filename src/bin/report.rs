@@ -639,6 +639,26 @@ mod format_tests {
     use super::*;
 
     #[test]
+    fn quirks_use_the_images_own_filler_byte() {
+        // DSK quirks assumed 0xE5 filler. A +3 image padded with 0x00 reported a
+        // "non-standard filler byte" quirk on every track.
+        use dskmanager::{DiskImage, FormatSpec, SideMode};
+
+        let image = DiskImage::create(
+            FormatSpec::spectrum_plus3().with_filler_byte(0),
+        )
+        .unwrap();
+        assert_eq!(image.spec().side_mode, SideMode::SingleSide);
+
+        let spec = dskmanager::DiskSpecification::identify(&image);
+        let quirks = md_quirks(&image, &spec);
+        assert!(
+            !quirks.iter().any(|q| q.contains("filler byte")),
+            "unexpected filler quirk: {quirks:?}"
+        );
+    }
+
+    #[test]
     fn filters_match_a_disk_with_the_quirk_on_any_side() {
         // The filters returned false as soon as one side failed the check, so a
         // 2-sided image with a CRC error only on side 1 was excluded.
@@ -1305,7 +1325,10 @@ fn md_quirks(image: &DiskImage, spec: &DiskSpecification) -> Vec<String> {
         let mut alt_filler_tracks: Vec<(usize, usize)> = Vec::new();
 
         let standard_track_size = standard_sectors * standard_size;
-        let standard_filler = if is_raw { image.spec().filler_byte } else { 0xE5u8 };
+        // Use the image's own filler byte: a raw disk declares it in its spec,
+        // and a DSK records it per track. Defaulting to 0xE5 flagged every
+        // 0x00-padded +3 track as non-standard.
+        let standard_filler = image.spec().filler_byte;
 
         for t_idx in 0..total_tracks {
             let track = match disk.get_track(t_idx as u8) {
