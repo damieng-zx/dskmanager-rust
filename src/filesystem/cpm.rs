@@ -302,8 +302,13 @@ impl<'a> CpmFileSystem<'a> {
         spec: &DiskSpecification,
         max_entries: usize,
     ) -> Result<Vec<u8>> {
-        let dir_size_bytes = max_entries * 32;
-        let mut dir_data = Vec::with_capacity(dir_size_bytes);
+        // The directory geometry comes from an on-disk spec block, so it can
+        // claim far more entries than the disk holds. Clamp to the data area
+        // before reserving memory; a bogus spec otherwise aborts the process.
+        let requested_bytes = max_entries.saturating_mul(32);
+        let dir_size_bytes = requested_bytes.min(Self::data_area_bytes(spec));
+
+        let mut dir_data = Vec::new();
 
         // Directory starts at the first sector of the first track after reserved tracks
         let start_track = spec.reserved_tracks;
@@ -322,6 +327,15 @@ impl<'a> CpmFileSystem<'a> {
         }
 
         Ok(dir_data)
+    }
+
+    /// Bytes available after the reserved tracks, used to bound on-disk claims.
+    fn data_area_bytes(spec: &DiskSpecification) -> usize {
+        let total_tracks = spec.tracks_per_side as usize * spec.side_count() as usize;
+        total_tracks
+            .saturating_sub(spec.reserved_tracks as usize)
+            .saturating_mul(spec.sectors_per_track as usize)
+            .saturating_mul(spec.sector_size as usize)
     }
 
     /// Map a CP/M logical sector onto its physical side, track, and sector ID.
@@ -791,8 +805,30 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_dir_entry() {
-        let mut data = [0u8; 32];
+    fn test_directory_allocation_is_clamped_to_disk_capacity() {
+        // A spec block controls block_shift and directory_blocks. Declaring
+        // 255 directory blocks of 2 MB each asked for a 510 GB allocation on a
+        // 180 KB image, aborting the process.
+        let image = DiskImage::builder()
+            .num_tracks(40)
+            .sectors_per_track(9)
+            .build()
+            .unwrap();
+        let mut spec = DiskSpecification::new();
+        spec.tracks_per_side = 40;
+        spec.sectors_per_track = 9;
+        spec.reserved_tracks = 1;
+        spec.block_shift = 24;
+        spec.directory_blocks = 255;
+
+        let fs = CpmFileSystem::new(&image, spec).unwrap();
+        assert!(fs.read_dir().is_ok());
+        // Sanity: the accounting must stay on-disk.
+        assert_eq!(fs.info().total_blocks, 0);
+    }
+
+    #[test]
+    fn test_parse_dir_entry() {        let mut data = [0u8; 32];
         data[0] = 0; // User 0
         data[1..9].copy_from_slice(b"TESTFILE");
         data[9..12].copy_from_slice(b"TXT");
