@@ -123,7 +123,7 @@ fn read_standard_dsk(
     // DSK records alternate sides within each cylinder.
     for track_num in 0..num_tracks {
         for side in 0..num_sides {
-            let track = read_track(&mut file, track_num, side, track_size, warnings)?;
+            let track = read_track(&mut file, track_num, side, track_size, false, warnings)?;
             disks[side as usize].add_track(track);
         }
     }
@@ -181,7 +181,7 @@ fn read_extended_dsk(
                 // by reading the actual Track-Info block at the current position.
                 match recover_extended_track_size(&mut file, track_num, side)? {
                     Some(recovered) => {
-                        let track = read_track(&mut file, track_num, side, recovered, warnings)?;
+                        let track = read_track(&mut file, track_num, side, recovered, true, warnings)?;
                         disks[side as usize].add_track(track);
                         recovered_tracks += 1;
                     }
@@ -191,7 +191,7 @@ fn read_extended_dsk(
                     }
                 }
             } else {
-                let track = read_track(&mut file, track_num, side, track_size, warnings)?;
+                let track = read_track(&mut file, track_num, side, track_size, true, warnings)?;
                 disks[side as usize].add_track(track);
             }
         }
@@ -272,6 +272,9 @@ fn read_track(
     track_num: u8,
     side: u8,
     track_size: usize,
+    // Only Extended DSK stores a per-sector data length; Standard DSK leaves
+    // those two SIB bytes unused and writers put arbitrary values there.
+    extended: bool,
     warnings: &mut Vec<String>,
 ) -> Result<Track> {
     // Read the declared track length, tolerating a truncated file rather than
@@ -344,7 +347,7 @@ fn read_track(
         let sector_size_code = sib[3];
         let fdc_st1 = sib[4];
         let fdc_st2 = sib[5];
-        let data_length = if sib.len() >= 8 {
+        let data_length = if extended && sib.len() >= 8 {
             u16::from_le_bytes([sib[6], sib[7]])
         } else {
             fdc_size_to_stored_bytes(sector_size_code) as u16
@@ -560,6 +563,50 @@ mod tests {
         let image = read_dsk(&path).unwrap();
         std::fs::remove_file(&path).ok();
         image
+    }
+
+    #[test]
+    fn test_standard_dsk_ignores_sector_length_bytes() {
+        // In a Standard DSK the two bytes after ST2 are unused and frequently
+        // contain junk. They must not be treated as an ExtDsk data length.
+        const SECTORS: usize = 9;
+        const SECTOR_SIZE: usize = 512;
+        let track_len = TRACK_INFO_BLOCK_SIZE + SECTORS * SECTOR_SIZE;
+
+        let mut buf = vec![0u8; DISK_INFO_BLOCK_SIZE];
+        buf[..STANDARD_DSK_SIGNATURE.len()].copy_from_slice(STANDARD_DSK_SIGNATURE);
+        buf[DISK_INFO_CREATOR_OFFSET..DISK_INFO_CREATOR_OFFSET + 6].copy_from_slice(b"tester");
+        buf[DISK_INFO_TRACK_COUNT_OFFSET] = 1;
+        buf[DISK_INFO_SIDE_COUNT_OFFSET] = 1;
+        buf[DISK_INFO_TRACK_SIZE_OFFSET..DISK_INFO_TRACK_SIZE_OFFSET + 2]
+            .copy_from_slice(&(track_len as u16).to_le_bytes());
+
+        let mut track = vec![0u8; TRACK_INFO_BLOCK_SIZE];
+        track[..TRACK_INFO_MARKER.len()].copy_from_slice(TRACK_INFO_MARKER);
+        track[0x14] = 2;
+        track[0x15] = SECTORS as u8;
+        track[0x16] = 0x4E;
+        track[0x17] = 0xE5;
+        for i in 0..SECTORS {
+            let sib = 0x18 + i * SECTOR_INFO_SIZE;
+            track[sib + 2] = 0xC1 + i as u8;
+            track[sib + 3] = 2;
+            // Junk in the bytes that only Extended DSK uses.
+            track[sib + 6] = 0xAA;
+            track[sib + 7] = 0x55;
+        }
+        for i in 0..SECTORS {
+            track.extend(std::iter::repeat(0x30 + i as u8).take(SECTOR_SIZE));
+        }
+        buf.extend_from_slice(&track);
+
+        let image = read_buf(&buf, "std_sib");
+        let t0 = image.get_disk(0).unwrap().get_track(0).unwrap();
+        assert_eq!(t0.sector_count(), SECTORS);
+        for (i, sector) in t0.sectors().iter().enumerate() {
+            assert_eq!(sector.data().len(), SECTOR_SIZE, "sector {i} length");
+            assert_eq!(sector.data()[0], 0x30 + i as u8, "sector {i} content");
+        }
     }
 
     #[test]
