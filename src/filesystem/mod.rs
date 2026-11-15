@@ -184,10 +184,10 @@ pub struct FileSystemInfo {
 /// Filesystem trait for accessing files on DSK images
 pub trait FileSystem {
     /// Attempt to mount a filesystem from a DSK image (read-only)
-    fn from_image<'a>(image: &'a DiskImage) -> Result<Self> where Self: Sized;
+    fn from_image(image: &DiskImage) -> Result<Self> where Self: Sized;
 
     /// Attempt to mount a filesystem from a DSK image (read-write)
-    fn from_image_mut<'a>(image: &'a mut DiskImage) -> Result<Self> where Self: Sized;
+    fn from_image_mut(image: &mut DiskImage) -> Result<Self> where Self: Sized;
 
     /// List directory entries
     fn read_dir(&self) -> Result<Vec<DirEntry>>;

@@ -369,7 +369,7 @@ impl<'a> TrdosFileSystem<'a> {
 }
 
 impl<'a> FileSystem for TrdosFileSystem<'a> {
-    fn from_image<'b>(_image: &'b DiskImage) -> Result<Self>
+    fn from_image(_image: &DiskImage) -> Result<Self>
     where
         Self: Sized,
     {
@@ -378,7 +378,7 @@ impl<'a> FileSystem for TrdosFileSystem<'a> {
         ))
     }
 
-    fn from_image_mut<'b>(_image: &'b mut DiskImage) -> Result<Self>
+    fn from_image_mut(_image: &mut DiskImage) -> Result<Self>
     where
         Self: Sized,
     {

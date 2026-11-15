@@ -581,7 +581,7 @@ impl CpmFileSystem<'_> {
 }
 
 impl<'a> FileSystem for CpmFileSystem<'a> {
-    fn from_image<'b>(_image: &'b DiskImage) -> Result<Self>
+    fn from_image(_image: &DiskImage) -> Result<Self>
     where
         Self: Sized,
     {
@@ -590,7 +590,7 @@ impl<'a> FileSystem for CpmFileSystem<'a> {
         ))
     }
 
-    fn from_image_mut<'b>(_image: &'b mut DiskImage) -> Result<Self>
+    fn from_image_mut(_image: &mut DiskImage) -> Result<Self>
     where
         Self: Sized,
     {
