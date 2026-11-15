@@ -19,7 +19,7 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "dsk"
-path = "src/bin/dsk.rs"
+path = "src/bin/dsk/main.rs"
 
 [dependencies]
 thiserror = "2.0"
