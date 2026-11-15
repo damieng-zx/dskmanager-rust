@@ -693,7 +693,7 @@ mod tests {
         // entries and repairing parent pointers. Drive it repeatedly and check
         // every internal node still points at its parent.
         let mut decoder = LzhufDecoder::new(&[]);
-        for code in [b'a', b'b', b'c', b'a', b'b', b'a', b'd', b'a'] {
+        for &code in b"abcabada" {
             decoder.update(code as usize);
         }
 
