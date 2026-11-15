@@ -79,7 +79,7 @@ pub fn decode_amstrad_basic(data: &[u8]) -> Result<String> {
         
         // Sanity check: length must be at least 5 (2 length + 2 line_num + 1 terminator)
         // and reasonable maximum
-        if line_len < 5 || line_len > 1000 {
+        if !(5..=1000).contains(&line_len) {
             break;
         }
         
@@ -353,7 +353,7 @@ fn decode_amstrad_basic_line(data: &[u8]) -> Result<String> {
                     } else if ch == 0x00 {
                         // End of line - unclosed string
                         break;
-                    } else if ch >= 0x20 && ch <= 0x7E {
+                    } else if (0x20..=0x7E).contains(&ch) {
                         output.push(ch as char);
                     } else {
                         output.push_str(&format!("\\x{:02X}", ch));

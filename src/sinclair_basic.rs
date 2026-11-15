@@ -173,7 +173,7 @@ fn decode_sinclair_basic_line(data: &[u8], mode: SinclairBasicMode) -> Result<St
                     if actual_len > 0 {
                         // Check if this string is a number representation (all digits, spaces, decimal point, +, -, E)
                         let is_number_string = data[pos..pos + actual_len].iter().all(|&ch| {
-                            (ch >= b'0' && ch <= b'9') || 
+                            ch.is_ascii_digit() ||
                             ch == b' ' || ch == b'.' || ch == b'+' || ch == b'-' || 
                             ch == b'E' || ch == b'e'
                         });
@@ -190,7 +190,7 @@ fn decode_sinclair_basic_line(data: &[u8], mode: SinclairBasicMode) -> Result<St
                                 if ch == 0x0D {
                                     // NEWLINE ends the string
                                     break;
-                                } else if ch >= 0x20 && ch <= 0x7E {
+                                } else if (0x20..=0x7E).contains(&ch) {
                                     output.push(ch as char);
                                 } else {
                                     output.push_str(&format!("\\x{:02X}", ch));
@@ -491,5 +491,22 @@ mod tests {
     fn test_spectrum_float_negative() {
         // The sign bit is the top bit of the first mantissa byte.
         assert_eq!(decode_spectrum_float(&[0x81, 0xC0, 0x00, 0x00, 0x00]), "-1.5");
+    }
+
+    #[test]
+    fn test_printable_ascii_boundaries() {
+        // The line decoder emits 0x20..=0x7D literally and handles 0x7E (the
+        // float marker) and 0xA3.. separately. Guards the range tests.
+        let mut program = Vec::new();
+        program.extend_from_slice(&10u16.to_be_bytes());
+        // '!' (0x21, lower printable edge) and '}' (0x7D, upper printable edge).
+        let mut text = vec![0x21u8, 0x7D];
+        text.push(0x0D);
+        program.extend_from_slice(&(text.len() as u16).to_le_bytes());
+        program.extend_from_slice(&text);
+        program.extend_from_slice(&[0x80, 0x80, 0x00, 0x00]);
+
+        let decoded = decode_sinclair_basic(&program, SinclairBasicMode::Mode128K).unwrap();
+        assert_eq!(decoded, "10 !}\n");
     }
 }
