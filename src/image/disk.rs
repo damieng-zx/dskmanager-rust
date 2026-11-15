@@ -1,5 +1,4 @@
-/// Disk (side) data structures
-
+//! Disk (side) data structures
 use crate::image::track::Track;
 
 /// A disk side containing multiple tracks

@@ -1,9 +1,9 @@
-/// SAM Coupe filesystem implementation
-///
-/// SAM Coupe specific filesystem using MGT format.
-///
-/// Directory entry extensions at offset 0xDC (220):
-/// - 33 bytes for SAM-specific metadata
+//! SAM Coupe filesystem implementation
+//!
+//! SAM Coupe specific filesystem using MGT format.
+//!
+//! Directory entry extensions at offset 0xDC (220):
+//! - 33 bytes for SAM-specific metadata
 
 use crate::error::Result;
 use crate::filesystem::mgt::{MgtDirEntry, MgtFileSystem, MgtFileType};

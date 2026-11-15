@@ -1,30 +1,30 @@
-/// TR-DOS filesystem implementation
-///
-/// TR-DOS is the disk operating system used with the Beta Disk Interface
-/// for the ZX Spectrum.
-///
-/// Directory format (verified against ZEsarUX scl2trd.c):
-/// - Directory entries stored in track 0, sectors 1-8
-/// - Each entry is 16 bytes, up to 128 entries (8 sectors * 16 entries)
-/// - Disk catalog at track 0, sector 9
-///
-/// Directory entry (16 bytes):
-/// Bytes 0-7:   Filename (8 characters, padded with spaces)
-/// Byte  8:     File type ('B'=BASIC, 'C'=CODE, 'D'=data array, '#'=print, etc.)
-/// Bytes 9-10:  Data length in bytes (LE u16)
-/// Bytes 11-12: Parameter 1 (LE u16) - start address for CODE, autostart for BASIC
-/// Byte  13:    Sector count (number of 256-byte sectors)
-/// Byte  14:    Start sector (0-based within track)
-/// Byte  15:    Start track
-///
-/// Catalog sector (track 0, sector 9) offsets:
-/// Byte 225 (0xE1): First free sector within track
-/// Byte 226 (0xE2): First free track
-/// Byte 227 (0xE3): Disk type (0x16=80t DS, 0x17=80t SS, 0x18=40t SS, 0x19=40t DS)
-/// Byte 228 (0xE4): Number of files
-/// Byte 229 (0xE5): Free sectors low byte
-/// Byte 230 (0xE6): Free sectors high byte
-/// Byte 231 (0xE7): TR-DOS ID (0x10)
+//! TR-DOS filesystem implementation
+//!
+//! TR-DOS is the disk operating system used with the Beta Disk Interface
+//! for the ZX Spectrum.
+//!
+//! Directory format (verified against ZEsarUX scl2trd.c):
+//! - Directory entries stored in track 0, sectors 1-8
+//! - Each entry is 16 bytes, up to 128 entries (8 sectors * 16 entries)
+//! - Disk catalog at track 0, sector 9
+//!
+//! Directory entry (16 bytes):
+//! Bytes 0-7:   Filename (8 characters, padded with spaces)
+//! Byte  8:     File type ('B'=BASIC, 'C'=CODE, 'D'=data array, '#'=print, etc.)
+//! Bytes 9-10:  Data length in bytes (LE u16)
+//! Bytes 11-12: Parameter 1 (LE u16) - start address for CODE, autostart for BASIC
+//! Byte  13:    Sector count (number of 256-byte sectors)
+//! Byte  14:    Start sector (0-based within track)
+//! Byte  15:    Start track
+//!
+//! Catalog sector (track 0, sector 9) offsets:
+//! Byte 225 (0xE1): First free sector within track
+//! Byte 226 (0xE2): First free track
+//! Byte 227 (0xE3): Disk type (0x16=80t DS, 0x17=80t SS, 0x18=40t SS, 0x19=40t DS)
+//! Byte 228 (0xE4): Number of files
+//! Byte 229 (0xE5): Free sectors low byte
+//! Byte 230 (0xE6): Free sectors high byte
+//! Byte 231 (0xE7): TR-DOS ID (0x10)
 
 use crate::error::{DskError, Result};
 use crate::filesystem::{DirEntry, FileAttributes, FileSystem, FileSystemInfo};

@@ -1,14 +1,14 @@
-/// TRD file reader
-///
-/// TRD files are raw sector dumps used by TR-DOS on the ZX Spectrum
-/// with the Beta Disk Interface.
-///
-/// Format:
-/// - Variable size (up to 655,360 bytes for 80-track double-sided)
-/// - 16 sectors per track, 256 bytes per sector
-/// - Sectors stored sequentially: T0S1..T0S16, T1S1..T1S16, ...
-/// - Directory in track 0 (sectors 1-8), disk catalog at sector 9
-/// - Double-sided images: sides stored sequentially (side 0 then side 1)
+//! TRD file reader
+//!
+//! TRD files are raw sector dumps used by TR-DOS on the ZX Spectrum
+//! with the Beta Disk Interface.
+//!
+//! Format:
+//! - Variable size (up to 655,360 bytes for 80-track double-sided)
+//! - 16 sectors per track, 256 bytes per sector
+//! - Sectors stored sequentially: T0S1..T0S16, T1S1..T1S16, ...
+//! - Directory in track 0 (sectors 1-8), disk catalog at sector 9
+//! - Double-sided images: sides stored sequentially (side 0 then side 1)
 
 use crate::error::{DskError, Result};
 use crate::format::{DiskImageFormat, FormatSpec, SideMode};

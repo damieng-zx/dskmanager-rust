@@ -1,5 +1,4 @@
-/// CP/M filesystem implementation
-
+//! CP/M filesystem implementation
 use crate::error::{DskError, Result};
 use crate::filesystem::{
     try_parse_header, DirEntry, ExtendedDirEntry, FileAttributes, FileHeader, FileSystem,

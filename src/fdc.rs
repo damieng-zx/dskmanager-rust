@@ -1,6 +1,6 @@
-/// Floppy Disk Controller (FDC) status register definitions
-///
-/// Based on the NEC uPD765/Intel 8272 FDC used in Amstrad CPC, Spectrum +3, etc.
+//! Floppy Disk Controller (FDC) status register definitions
+//!
+//! Based on the NEC uPD765/Intel 8272 FDC used in Amstrad CPC, Spectrum +3, etc.
 
 use std::fmt;
 

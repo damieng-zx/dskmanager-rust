@@ -1,14 +1,14 @@
-/// MGT file reader
-///
-/// MGT files are raw sector dumps used by:
-/// - MGT +D / DISCiPLE for ZX Spectrum
-/// - SAM Coupe
-///
-/// Format:
-/// - Fixed 819,200 bytes (800KB)
-/// - 80 tracks per side, 2 sides
-/// - 10 sectors per track, 512 bytes each
-/// - Tracks alternate: S0T0, S1T0, S0T1, S1T1, ...
+//! MGT file reader
+//!
+//! MGT files are raw sector dumps used by:
+//! - MGT +D / DISCiPLE for ZX Spectrum
+//! - SAM Coupe
+//!
+//! Format:
+//! - Fixed 819,200 bytes (800KB)
+//! - 80 tracks per side, 2 sides
+//! - 10 sectors per track, 512 bytes each
+//! - Tracks alternate: S0T0, S1T0, S0T1, S1T1, ...
 
 use crate::error::{DskError, Result};
 use crate::format::{DiskImageFormat, FormatSpec, SideMode};

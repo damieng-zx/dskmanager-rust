@@ -1,5 +1,4 @@
-/// DSK format specifications and constants
-
+//! DSK format specifications and constants
 /// Format constants
 pub mod constants;
 /// Format specification types

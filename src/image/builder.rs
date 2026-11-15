@@ -1,5 +1,4 @@
-/// Builder for creating DSK images
-
+//! Builder for creating DSK images
 use crate::error::Result;
 use crate::format::{DiskImageFormat, FormatSpec};
 use crate::image::{Disk, DiskImage, Sector, SectorId, Track};

@@ -1,4 +1,4 @@
-/// Sector map visualization
+//! Sector map visualization
 
 use crate::image::{DiskImage, SectorStatus};
 

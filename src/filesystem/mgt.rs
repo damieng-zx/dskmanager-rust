@@ -1,13 +1,13 @@
-/// MGT filesystem implementation
-///
-/// Base implementation for MGT-format disk filesystems used by:
-/// - MGT +D / DISCiPLE for ZX Spectrum
-/// - SAM Coupe
-///
-/// Directory format:
-/// - First 4 tracks (40 sectors) reserved for directory
-/// - Each file entry is 256 bytes (2 per sector)
-/// - Max 80 directory entries
+//! MGT filesystem implementation
+//!
+//! Base implementation for MGT-format disk filesystems used by:
+//! - MGT +D / DISCiPLE for ZX Spectrum
+//! - SAM Coupe
+//!
+//! Directory format:
+//! - First 4 tracks (40 sectors) reserved for directory
+//! - Each file entry is 256 bytes (2 per sector)
+//! - Max 80 directory entries
 
 use crate::error::{DskError, Result};
 use crate::filesystem::{ExtendedDirEntry, FileAttributes, FileHeader, HeaderType};

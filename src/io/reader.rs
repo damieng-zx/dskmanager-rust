@@ -1,5 +1,4 @@
-/// DSK file reader
-
+//! DSK file reader
 use crate::error::{DskError, Result};
 use crate::fdc::{FdcStatus1, FdcStatus2};
 use crate::format::constants::*;

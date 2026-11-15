@@ -1,4 +1,4 @@
-/// Interactive DSK console application
+//! Interactive DSK console application
 
 use dez80::Instruction;
 

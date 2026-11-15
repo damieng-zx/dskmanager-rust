@@ -1,5 +1,4 @@
-/// Sector data structures
-
+//! Sector data structures
 use crate::fdc::{FdcStatus1, FdcStatus2};
 use crate::format::constants::fdc_size_to_bytes;
 

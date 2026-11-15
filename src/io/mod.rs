@@ -1,5 +1,4 @@
-/// I/O operations for reading and writing DSK files
-
+//! I/O operations for reading and writing DSK files
 /// Reader implementation for DSK files
 pub mod reader;
 /// Reader implementation for MGT files

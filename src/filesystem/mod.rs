@@ -1,5 +1,4 @@
-/// Filesystem implementations
-
+//! Filesystem implementations
 /// CP/M filesystem implementation
 pub mod cpm;
 /// DISCiPLE/+D filesystem implementation (ZX Spectrum)

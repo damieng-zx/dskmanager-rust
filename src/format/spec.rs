@@ -1,5 +1,4 @@
-/// Disk format specifications and presets
-
+//! Disk format specifications and presets
 /// Disk format specification
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FormatSpec {

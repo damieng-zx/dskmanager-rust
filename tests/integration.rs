@@ -1,4 +1,4 @@
-/// Integration tests for dskmanager
+//! Integration tests for dskmanager
 
 use dskmanager::*;
 

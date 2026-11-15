@@ -1,5 +1,4 @@
-/// Amstrad BASIC tokenized file decoder (Locomotive BASIC for Amstrad CPC)
-
+//! Amstrad BASIC tokenized file decoder (Locomotive BASIC for Amstrad CPC)
 use crate::error::{DskError, Result};
 use crate::filesystem::{HeaderType, try_parse_header};
 

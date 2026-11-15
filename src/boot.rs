@@ -1,7 +1,7 @@
-/// Boot detection for disk images
-///
-/// Examines disk images to determine what system they are bootable on
-/// and provides a reason for the detection.
+//! Boot detection for disk images
+//!
+//! Examines disk images to determine what system they are bootable on
+//! and provides a reason for the detection.
 
 use crate::filesystem::CpmFileSystem;
 use crate::filesystem::try_plus3dos_header;

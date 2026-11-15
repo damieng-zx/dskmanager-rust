@@ -1,4 +1,4 @@
-/// Sinclair BASIC tokenized file decoder (ZX Spectrum, ZX81, etc.)
+//! Sinclair BASIC tokenized file decoder (ZX Spectrum, ZX81, etc.)
 
 use crate::error::{DskError, Result};
 use crate::filesystem::{HeaderType, try_parse_header};

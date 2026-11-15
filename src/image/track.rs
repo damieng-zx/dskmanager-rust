@@ -1,5 +1,4 @@
-/// Track data structures
-
+//! Track data structures
 use crate::image::sector::Sector;
 use std::collections::HashMap;
 

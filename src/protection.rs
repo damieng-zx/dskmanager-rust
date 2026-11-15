@@ -1,8 +1,8 @@
-/// Copy protection detection for DSK disk images
-///
-/// Uses a fingerprinting flow that identifies every known CPC / ZX Spectrum +3
-/// copy-protection scheme with the minimum number of reads. Starts at track 0
-/// and branches out only as far as needed.
+//! Copy protection detection for DSK disk images
+//!
+//! Uses a fingerprinting flow that identifies every known CPC / ZX Spectrum +3
+//! copy-protection scheme with the minimum number of reads. Starts at track 0
+//! and branches out only as far as needed.
 
 use crate::image::{Disk, Sector, Track};
 

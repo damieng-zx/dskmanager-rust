@@ -1,5 +1,4 @@
-/// DSK format magic bytes and constants
-
+//! DSK format magic bytes and constants
 /// Standard DSK format signature
 pub const STANDARD_DSK_SIGNATURE: &[u8] = b"MV - CPCEMU Disk-File\r\nDisk-Info\r\n";
 

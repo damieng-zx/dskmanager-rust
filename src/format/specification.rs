@@ -1,7 +1,7 @@
-/// Disk specification for CP/M and similar file systems
-///
-/// This module provides detection and representation of disk specifications
-/// used by CP/M and compatible systems (Amstrad PCW, CPC, Spectrum +3, etc.)
+//! Disk specification for CP/M and similar file systems
+//!
+//! This module provides detection and representation of disk specifications
+//! used by CP/M and compatible systems (Amstrad PCW, CPC, Spectrum +3, etc.)
 
 use crate::image::DiskImage;
 use std::fmt;

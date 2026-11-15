@@ -1,5 +1,4 @@
-/// DSK image data structures
-
+//! DSK image data structures
 /// Image builder for creating DSK images
 pub mod builder;
 /// Disk structure

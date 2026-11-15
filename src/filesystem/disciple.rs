@@ -1,12 +1,12 @@
-/// DISCiPLE/+D filesystem implementation
-///
-/// ZX Spectrum specific filesystem using MGT format.
-/// Used by:
-/// - Miles Gordon Technology DISCiPLE
-/// - MGT +D
-///
-/// Directory entry extensions at offset 0xD2 (210):
-/// - 10 bytes for Disciple/+D metadata
+//! DISCiPLE/+D filesystem implementation
+//!
+//! ZX Spectrum specific filesystem using MGT format.
+//! Used by:
+//! - Miles Gordon Technology DISCiPLE
+//! - MGT +D
+//!
+//! Directory entry extensions at offset 0xD2 (210):
+//! - 10 bytes for Disciple/+D metadata
 
 use crate::error::Result;
 use crate::filesystem::mgt::{MgtDirEntry, MgtFileSystem, MgtFileType};
