@@ -439,8 +439,68 @@ fn check_filesystem(image: &DiskImage, issues: &mut Vec<VerifyIssue>) {
     match effective_fs {
         FileSystemType::Cpm => check_cpm_filesystem(image, issues),
         FileSystemType::Mgt => check_mgt_filesystem(image, issues),
-        FileSystemType::Trdos => {}
+        FileSystemType::Trdos => check_trdos_filesystem(image, issues),
         FileSystemType::Auto => {}
+    }
+}
+
+fn check_trdos_filesystem(image: &DiskImage, issues: &mut Vec<VerifyIssue>) {
+    let fs = match crate::filesystem::TrdosFileSystem::new(image) {
+        Ok(fs) => fs,
+        Err(_) => {
+            add(issues, Severity::Warning, IssueLocation::Filesystem, "Could not mount TR-DOS filesystem");
+            return;
+        }
+    };
+
+    let total_sectors = image.spec().num_tracks as usize
+        * image.spec().num_sides as usize
+        * crate::filesystem::trdos::TRD_SECTORS_PER_TRACK as usize;
+
+    for entry in fs.directory() {
+        if entry.deleted {
+            continue;
+        }
+
+        let start = entry.first_absolute_sector() as usize;
+        let end = start.saturating_add(entry.sector_count as usize);
+        if end > total_sectors {
+            add(
+                issues,
+                Severity::Error,
+                IssueLocation::File(entry.filename.clone()),
+                format!(
+                    "File starts at sector {} and needs {} sectors, past the {}-sector disk",
+                    start, entry.sector_count, total_sectors
+                ),
+            );
+            continue;
+        }
+
+        if entry.data_length as usize > entry.sector_count as usize * 256 {
+            add(
+                issues,
+                Severity::Warning,
+                IssueLocation::File(entry.filename.clone()),
+                format!(
+                    "File length {} exceeds the {} bytes allocated",
+                    entry.data_length,
+                    entry.sector_count as usize * 256
+                ),
+            );
+        }
+    }
+
+    if let Some(catalog) = fs.catalog() {
+        let live: usize = fs.directory().iter().filter(|e| !e.deleted).count();
+        if catalog.num_files as usize != live {
+            add(
+                issues,
+                Severity::Warning,
+                IssueLocation::Filesystem,
+                format!("Catalog records {} files but {} entries are present", catalog.num_files, live),
+            );
+        }
     }
 }
 
@@ -671,6 +731,39 @@ mod tests {
             "unexpected errors: {:?}",
             report.issues.iter().map(|i| &i.message).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn test_verify_detects_trdos_directory_overrun() {
+        // TR-DOS verification did nothing, so a directory entry pointing past
+        // the end of the disk "passed" while read_file wrapped around and
+        // returned garbage.
+        use crate::filesystem::{format_filesystem, FileSystemType};
+        use crate::format::{DiskImageFormat, FormatSpec};
+
+        let mut image = DiskImage::builder()
+            .format(DiskImageFormat::RawTrd)
+            .spec(FormatSpec::trdos())
+            .build()
+            .unwrap();
+        format_filesystem(&mut image, FileSystemType::Trdos).unwrap();
+
+        let mut sector = image.read_sector(0, 0, 1).unwrap().to_vec();
+        sector[..8].copy_from_slice(b"BOGUS   ");
+        sector[8] = b'C';
+        sector[9..11].copy_from_slice(&51200u16.to_le_bytes());
+        sector[13] = 200; // 200 sectors from track 70 runs off the disk
+        sector[14] = 0;
+        sector[15] = 70;
+        image.write_sector(0, 0, 1, &sector).unwrap();
+
+        let report = verify(&image);
+        assert!(
+            report.issues.iter().any(|i| i.location.to_string().contains("BOGUS")),
+            "expected the overrunning file to be reported, got {:?}",
+            report.issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+        assert!(!report.passed());
     }
 
     #[test]
