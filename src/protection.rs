@@ -1827,7 +1827,7 @@ mod tests {
         for i in 0u8..18 {
             let fill = 0xAA + i;
             let r_val = 0xC1u8.wrapping_add(i.wrapping_mul(7));
-            let h_val = (i as u8).wrapping_mul(32) & 0xF8;
+            let h_val = i.wrapping_mul(32) & 0xF8;
             let s = Sector::with_data(
                 SectorId::new(btrnum, h_val, r_val, 1),
                 vec![fill; 256],

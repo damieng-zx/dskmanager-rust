@@ -434,7 +434,7 @@ fn decode_locomotive_float(bytes: &[u8]) -> String {
     }
 
     // Extract exponent (byte 4)
-    let exponent_biased = bytes[4] as u8;
+    let exponent_biased = bytes[4];
     let exponent = exponent_biased as i32 - 128;
 
     // Extract sign from bit 7 of byte 3

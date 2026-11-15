@@ -418,7 +418,7 @@ fn decode_lzhuf_stream(data: &[u8]) -> Result<Vec<u8>> {
                 if output.len() >= MAX_FILE_SIZE {
                     break;
                 }
-                let byte = decoder.text_buf[(start + index as usize) & 0xFFF];
+                let byte = decoder.text_buf[(start + index) & 0xFFF];
                 output.push(byte);
                 decoder.text_buf[decoder.r] = byte;
                 decoder.r = (decoder.r + 1) & 0xFFF;
