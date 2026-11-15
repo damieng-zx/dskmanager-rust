@@ -52,6 +52,10 @@ impl std::fmt::Display for FileSystemType {
 
 impl FileSystemType {
     /// Parse from string (case-insensitive)
+    ///
+    /// Prefer the [`FromStr`] implementation; this remains as a convenience that
+    /// predates it and must stay in step with it.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "auto" => Some(FileSystemType::Auto),
@@ -60,6 +64,27 @@ impl FileSystemType {
             "trdos" | "tr-dos" | "trd" => Some(FileSystemType::Trdos),
             _ => None,
         }
+    }
+}
+
+/// Error returned when a filesystem type string is not recognised.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParseFileSystemTypeError;
+
+impl std::fmt::Display for ParseFileSystemTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown filesystem type")
+    }
+}
+
+impl std::error::Error for ParseFileSystemTypeError {}
+
+impl std::str::FromStr for FileSystemType {
+    type Err = ParseFileSystemTypeError;
+
+    /// Parse a filesystem type, case-insensitively.
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        FileSystemType::from_str(s).ok_or(ParseFileSystemTypeError)
     }
 }
 
@@ -325,4 +350,31 @@ pub fn try_parse_header(data: &[u8]) -> FileHeader {
     }
 
     FileHeader::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_filesystem_type_parses_via_from_str_trait() {
+        // `FileSystemType::from_str` shadows the std FromStr method name, so the
+        // inherent helper wins at every call site. Go through the trait and
+        // require it to accept the same spellings.
+        use std::str::FromStr;
+
+        for spelling in ["auto", "cpm", "cp/m", "mgt", "sam", "trdos", "tr-dos", "trd"] {
+            let via_trait = <FileSystemType as FromStr>::from_str(spelling);
+            let via_helper = FileSystemType::from_str(spelling);
+            assert!(via_trait.is_ok(), "{spelling} should parse through FromStr");
+            assert_eq!(via_trait.ok(), via_helper, "{spelling} disagreements");
+        }
+
+        assert!(<FileSystemType as FromStr>::from_str("nonsense").is_err());
+        // Case-insensitive, as the helper documents.
+        assert_eq!(
+            <FileSystemType as FromStr>::from_str("TRDOS").ok(),
+            Some(FileSystemType::Trdos)
+        );
+    }
 }
