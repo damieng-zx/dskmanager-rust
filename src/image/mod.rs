@@ -228,15 +228,24 @@ impl DiskImage {
 
             let mut output = self.clone();
             output.format = output_format;
-            crate::io::writer::write_dsk(&output, path)?;
+            // Write via a sibling temp file and rename, so a rejected format or
+            // a mid-write failure never truncates an existing image.
+            let temp_path = temp_sibling(path.as_ref());
+            if let Err(error) = crate::io::writer::write_dsk(&output, &temp_path) {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(error);
+            }
+            if let Err(error) = std::fs::rename(&temp_path, path.as_ref()) {
+                let _ = std::fs::remove_file(&temp_path);
+                return Err(error.into());
+            }
             self.format = output_format;
         }
         self.changed = false;
         Ok(())
     }
 
-    fn validate_raw_geometry(&self, sides: u8, tracks: u8, sectors: u8, size: usize) -> Result<()> {
-        let valid = self.disks.len() == sides as usize
+    fn validate_raw_geometry(&self, sides: u8, tracks: u8, sectors: u8, size: usize) -> Result<()> {        let valid = self.disks.len() == sides as usize
             && self.spec.num_sides == sides
             && self.spec.num_tracks == tracks
             && self.disks.iter().all(|disk| {
@@ -261,7 +270,6 @@ impl DiskImage {
     pub fn is_changed(&self) -> bool {
         self.changed
     }
-
     /// Mark the image as unchanged
     pub fn mark_unchanged(&mut self) {
         self.changed = false;
@@ -342,6 +350,17 @@ impl DiskImage {
 
     // Note: with_filesystem methods are not provided due to lifetime complexity.
     // Use CpmFileSystem::from_image(&image) directly instead.
+}
+
+/// Build a temporary path beside `path` so the final rename stays on one volume.
+fn temp_sibling(path: &Path) -> std::path::PathBuf {
+    let mut name = std::ffi::OsString::from(".");
+    match path.file_name() {
+        Some(file_name) => name.push(file_name),
+        None => name.push("image"),
+    }
+    name.push(format!(".tmp-{}", std::process::id()));
+    path.with_file_name(name)
 }
 
 #[cfg(test)]
@@ -451,5 +470,19 @@ mod tests {
         let path = std::env::temp_dir().join(format!("dskmgr_invalid_{}.mgt", std::process::id()));
         assert!(image.save(&path).is_err());
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn test_failed_save_keeps_existing_file_intact() {
+        // The format is rejected after the output file is opened, so a failed
+        // save used to truncate whatever was already there.
+        let mut image = DiskImage::create(FormatSpec::amstrad_data()).unwrap();
+        let path = std::env::temp_dir().join(format!("dskmgr_keep_{}.scl", std::process::id()));
+        std::fs::write(&path, b"original contents").unwrap();
+
+        assert!(image.save(&path).is_err());
+        let after = std::fs::read(&path).unwrap();
+        std::fs::remove_file(&path).ok();
+        assert_eq!(after, b"original contents");
     }
 }
