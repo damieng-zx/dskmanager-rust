@@ -632,22 +632,24 @@ fn check_cpm_filesystem(image: &DiskImage, issues: &mut Vec<VerifyIssue>) {
 }
 
 fn check_mgt_filesystem(image: &DiskImage, issues: &mut Vec<VerifyIssue>) {
-    let system_name;
-    let info;
-    let dir_entries: Vec<_>;
+    // DiscipleFileSystem mounts any MGT image, so trying it first always
+    // succeeded and every SAM disk was labelled DISCiPLE. Use the detected
+    // system type instead.
+    let fs = match crate::filesystem::MgtFileSystem::new(image) {
+        Ok(fs) => fs,
+        Err(_) => {
+            add(issues, Severity::Warning, IssueLocation::Filesystem, "Could not mount MGT filesystem");
+            return;
+        }
+    };
 
-    if let Ok(fs) = crate::filesystem::DiscipleFileSystem::new(image) {
-        system_name = "DISCiPLE/+D";
-        info = fs.mgt().info();
-        dir_entries = fs.mgt().directory().to_vec();
-    } else if let Ok(fs) = crate::filesystem::SamFileSystem::new(image) {
-        system_name = "SAM Coupe";
-        info = fs.mgt().info();
-        dir_entries = fs.mgt().directory().to_vec();
-    } else {
-        add(issues, Severity::Warning, IssueLocation::Filesystem, "Could not mount MGT filesystem");
-        return;
-    }
+    let system_name = match fs.system_type() {
+        crate::filesystem::MgtSystemType::Sam => "SAM Coupe",
+        crate::filesystem::MgtSystemType::Disciple => "DISCiPLE/+D",
+        crate::filesystem::MgtSystemType::Unknown => "MGT",
+    };
+    let info = fs.info();
+    let dir_entries: Vec<_> = fs.directory().to_vec();
 
     for entry in &dir_entries {
         if entry.hidden {
@@ -730,6 +732,33 @@ mod tests {
             report.error_count() == 0,
             "unexpected errors: {:?}",
             report.issues.iter().map(|i| &i.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_verify_names_the_detected_mgt_variant() {
+        // check_mgt_filesystem always tried DiscipleFileSystem first, which
+        // succeeds for any MGT image, so SAM disks were labelled DISCiPLE/+D.
+        use crate::format::{DiskImageFormat, FormatSpec};
+
+        let image = DiskImage::builder()
+            .format(DiskImageFormat::RawMgt)
+            .spec(FormatSpec::new(2, 80, 10, 512).with_first_sector_id(1).with_filler_byte(0))
+            .build()
+            .unwrap();
+        let spec = DiskSpecification::identify(&image);
+        assert!(spec.format.starts_with("MGT Sam Coupe"), "got {:?}", spec.format);
+
+        let report = verify(&image);
+        let named: Vec<String> = report
+            .issues
+            .iter()
+            .map(|i| i.message.clone())
+            .filter(|m| m.contains("DISCiPLE") || m.contains("SAM Coupe"))
+            .collect();
+        assert!(
+            named.iter().all(|m| !m.contains("DISCiPLE")),
+            "SAM disk reported as DISCiPLE: {named:?}"
         );
     }
 
