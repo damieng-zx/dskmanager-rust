@@ -53,7 +53,9 @@ pub fn read_scl<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
         let entry = &bytes[offset..offset + ENTRY_SIZE];
         let length = u16::from_le_bytes([entry[9], entry[10]]) as usize;
         let sector_count = entry[13] as usize;
-        if length.div_ceil(SECTOR_SIZE) != sector_count {
+        // A file may be allocated more sectors than its length needs; only a
+        // count too small to hold the data is invalid.
+        if sector_count < length.div_ceil(SECTOR_SIZE) {
             return Err(DskError::invalid_format(format!("Invalid length/sector count in SCL entry {}", index)));
         }
         total_sectors = total_sectors.checked_add(sector_count)
@@ -190,6 +192,36 @@ mod tests {
         assert_eq!(restored_fs.read_file("HELLO").unwrap(), vec![0x42; 513]);
         assert_eq!(restored_entry.param1, expected_param);
         assert_eq!(restored.format(), DiskImageFormat::RawScl);
+    }
+
+    #[test]
+    fn scl_accepts_files_with_spare_allocated_sectors() {
+        // Real TR-DOS disks often allocate more sectors than the file needs.
+        // write_scl wrote length and sector count independently and read_scl
+        // demanded they match exactly, so an image could not round-trip.
+        let mut image = DiskImage::builder().format(DiskImageFormat::RawTrd)
+            .spec(FormatSpec::trdos()).build().unwrap();
+        format_filesystem(&mut image, FileSystemType::Trdos).unwrap();
+        import_file(&mut image, FileSystemType::Trdos, "PADDED.C", &[0x41; 300]).unwrap();
+
+        // Inflate the recorded sector count to 4, and give the extra sectors data.
+        let mut entry = image.read_sector(0, 0, 1).unwrap().to_vec();
+        entry[13] = 4;
+        image.write_sector(0, 0, 1, &entry).unwrap();
+        for id in 2..=4 {
+            image.write_sector(0, 1, id, &[0x41; 256]).unwrap();
+        }
+
+        let path = std::env::temp_dir().join(format!("dskmgr_scl_spare_{}.scl", std::process::id()));
+        image.save(&path).unwrap();
+        let restored = DiskImage::open(&path);
+        std::fs::remove_file(path).ok();
+
+        let restored = restored.expect("SCL written by this crate must be readable");
+        assert_eq!(
+            TrdosFileSystem::new(&restored).unwrap().read_file("PADDED").unwrap(),
+            vec![0x41; 300]
+        );
     }
 
     #[test]
