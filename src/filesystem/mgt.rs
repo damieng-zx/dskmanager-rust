@@ -321,6 +321,11 @@ impl<'a> MgtFileSystem<'a> {
         &self.directory_entries
     }
 
+    /// The image this filesystem was mounted from.
+    pub fn image(&self) -> &'a DiskImage {
+        self.image
+    }
+
     /// Read file data by following the sector map
     /// Returns file data truncated to actual file length (not allocated size)
     pub fn read_file(&self, entry: &MgtDirEntry) -> Result<Vec<u8>> {

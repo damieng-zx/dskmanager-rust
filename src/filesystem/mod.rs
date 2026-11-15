@@ -1,4 +1,6 @@
 //! Filesystem implementations
+/// Unified front end over every filesystem driver
+pub mod any;
 /// CP/M filesystem implementation
 pub mod cpm;
 /// DISCiPLE/+D filesystem implementation (ZX Spectrum)
@@ -14,6 +16,7 @@ pub mod sam;
 /// TR-DOS filesystem implementation (ZX Spectrum Beta Disk Interface)
 pub mod trdos;
 
+pub use any::{mount, AnyFileSystem};
 pub use cpm::CpmFileSystem;
 pub use disciple::DiscipleFileSystem;
 pub use edit::{delete_file, import_file};

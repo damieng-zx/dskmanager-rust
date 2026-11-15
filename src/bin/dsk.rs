@@ -4,7 +4,7 @@ use dez80::Instruction;
 
 use dskmanager::*;
 use dskmanager::amstrad_basic::decode_amstrad_basic_file;
-use dskmanager::filesystem::TrdosFileSystem;
+use dskmanager::filesystem::AnyFileSystem;
 use dskmanager::sinclair_basic::decode_sinclair_basic_file;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
@@ -312,59 +312,9 @@ fn main() {
             }
             "fs-info" => {
                 if let Some(ref img) = image {
-                    // Determine effective filesystem type
-                    let effective_fs = match filesystem_mode {
-                        FileSystemType::Auto => img.default_filesystem(),
-                        other => other,
-                    };
-
-                    // Use appropriate filesystem
-                    match effective_fs {
-                        FileSystemType::Mgt => {
-                            match DiscipleFileSystem::new(img) {
-                                Ok(fs) => {
-                                    let mgt_info = fs.mgt().info();
-                                    println!("MGT filesystem ({})", mgt_info.system_type);
-                                    let sector_size = 512;
-                                    let total_sectors = mgt_info.total_sectors;
-                                    let free_sectors = mgt_info.free_sectors;
-                                    println!("Block size: {} bytes", sector_size);
-                                    println!("Total blocks: {}", total_sectors);
-                                    println!("Usable capacity: {} KB", total_sectors * sector_size / 1024);
-                                    println!("Free blocks: {}", free_sectors);
-                                    println!("Free space: {} KB", free_sectors * sector_size / 1024);
-                                }
-                                Err(e) => println!("Error: {}", e),
-                            }
-                        }
-                        FileSystemType::Trdos => {
-                            match TrdosFileSystem::new(img) {
-                                Ok(fs) => {
-                                    let info = fs.info();
-                                    println!("{} filesystem", info.fs_type);
-                                    println!("Block size: {} bytes", info.block_size);
-                                    println!("Total blocks: {}", info.total_blocks);
-                                    println!("Usable capacity: {} KB", info.total_blocks * info.block_size / 1024);
-                                    println!("Free blocks: {}", info.free_blocks);
-                                    println!("Free space: {} KB", info.free_blocks * info.block_size / 1024);
-                                }
-                                Err(e) => println!("Error: {}", e),
-                            }
-                        }
-                        FileSystemType::Cpm | FileSystemType::Auto => {
-                            match CpmFileSystem::from_image(img) {
-                                Ok(fs) => {
-                                    let info = fs.info();
-                                    println!("{} filesystem", info.fs_type);
-                                    println!("Block size: {} bytes", info.block_size);
-                                    println!("Total blocks: {}", info.total_blocks);
-                                    println!("Usable capacity: {} KB", info.total_blocks * info.block_size / 1024);
-                                    println!("Free blocks: {}", info.free_blocks);
-                                    println!("Free space: {} KB", info.free_blocks * info.block_size / 1024);
-                                }
-                                Err(e) => println!("Error: {}", e),
-                            }
-                        }
+                    match AnyFileSystem::mount(img, filesystem_mode) {
+                        Ok(fs) => print_filesystem_info(&fs.info()),
+                        Err(e) => println!("Error: {}", e),
                     }
                 } else {
                     println!("No image loaded.");
@@ -372,56 +322,9 @@ fn main() {
             }
             "fs-list" | "dir" | "cat" | "ls" => {
                 if let Some(ref img) = image {
-                    // Determine effective filesystem type
-                    let effective_fs = match filesystem_mode {
-                        FileSystemType::Auto => img.default_filesystem(),
-                        other => other,
-                    };
-
-                    // Use appropriate filesystem
-                    let entries_result: Result<Vec<ExtendedDirEntry>> = match effective_fs {
-                        FileSystemType::Mgt => {
-                            match DiscipleFileSystem::new(img) {
-                                Ok(fs) => fs.read_dir_extended(),
-                                Err(e) => Err(e),
-                            }
-                        }
-                        FileSystemType::Trdos => {
-                            match TrdosFileSystem::new(img) {
-                                Ok(fs) => {
-                                    let trd_dir = fs.directory();
-                                    let mut ext_entries = Vec::new();
-                                    for e in trd_dir {
-                                        let header = crate::filesystem::FileHeader {
-                                            header_type: crate::filesystem::HeaderType::None,
-                                            checksum_valid: false,
-                                            file_size: e.sector_count as usize * 256,
-                                            header_size: 0,
-                                            meta: e.display_type(),
-                                        };
-                                        ext_entries.push(ExtendedDirEntry {
-                                            name: e.filename.clone(),
-                                            user: 0,
-                                            index: e.index,
-                                            blocks: e.sector_count as usize,
-                                            allocated: e.sector_count as usize * 256,
-                                            size: e.sector_count as usize * 256,
-                                            attributes: crate::filesystem::FileAttributes::default(),
-                                            header,
-                                        });
-                                    }
-                                    Ok(ext_entries)
-                                }
-                                Err(e) => Err(e),
-                            }
-                        }
-                        FileSystemType::Cpm | FileSystemType::Auto => {
-                            match CpmFileSystem::from_image(img) {
-                                Ok(fs) => fs.read_dir_extended_with_deleted(),
-                                Err(e) => Err(e),
-                            }
-                        }
-                    };
+                    let entries_result: Result<Vec<ExtendedDirEntry>> =
+                        AnyFileSystem::mount(img, filesystem_mode)
+                            .and_then(|fs| fs.read_dir_extended());
 
                     match entries_result {
                         Ok(entries) => {
@@ -481,32 +384,8 @@ fn main() {
                         continue;
                     }
 
-                    // Determine effective filesystem type
-                    let effective_fs = match filesystem_mode {
-                        FileSystemType::Auto => img.default_filesystem(),
-                        other => other,
-                    };
-
-                    let data_result: Result<Vec<u8>> = match effective_fs {
-                        FileSystemType::Mgt => {
-                            match DiscipleFileSystem::new(img) {
-                                Ok(fs) => fs.read_file(&parts[1]),
-                                Err(e) => Err(e),
-                            }
-                        }
-                        FileSystemType::Trdos => {
-                            match TrdosFileSystem::new(img) {
-                                Ok(fs) => fs.read_file(&parts[1]),
-                                Err(e) => Err(e),
-                            }
-                        }
-                        FileSystemType::Cpm | FileSystemType::Auto => {
-                            match CpmFileSystem::from_image(img) {
-                                Ok(fs) => fs.read_file(&parts[1]),
-                                Err(e) => Err(e),
-                            }
-                        }
-                    };
+                    let data_result: Result<Vec<u8>> = AnyFileSystem::mount(img, filesystem_mode)
+                        .and_then(|fs| fs.read_file(&parts[1]));
 
                     match data_result {
                         Ok(data) => {
@@ -527,35 +406,9 @@ fn main() {
                         continue;
                     }
 
-                    // Determine effective filesystem type
-                    let effective_fs = match filesystem_mode {
-                        FileSystemType::Auto => img.default_filesystem(),
-                        other => other,
-                    };
-
-                    // Read file with header (we need to check the header)
-                    let data_result: Result<Vec<u8>> = match effective_fs {
-                        FileSystemType::Mgt => {
-                            match DiscipleFileSystem::new(img) {
-                                Ok(fs) => fs.read_file(&parts[1]),
-                                Err(e) => Err(e),
-                            }
-                        }
-                        FileSystemType::Trdos => {
-                            match TrdosFileSystem::new(img) {
-                                Ok(fs) => fs.read_file(&parts[1]),
-                                Err(e) => Err(e),
-                            }
-                        }
-                        FileSystemType::Cpm | FileSystemType::Auto => {
-                            match CpmFileSystem::from_image(img) {
-                                Ok(fs) => {
-                                    fs.read_file_binary(&parts[1], true)
-                                }
-                                Err(e) => Err(e),
-                            }
-                        }
-                    };
+                    // Read the file with its header so the decoder can inspect it.
+                    let data_result: Result<Vec<u8>> = AnyFileSystem::mount(img, filesystem_mode)
+                        .and_then(|fs| fs.read_file_raw(&parts[1]));
 
                     match data_result {
                         Ok(data) => {
@@ -609,47 +462,27 @@ fn main() {
                     // If no output path specified, use the source filename
                     let output_path = output_path.unwrap_or_else(|| src_filename.clone());
 
-                    // Determine effective filesystem type
-                    let effective_fs = match filesystem_mode {
-                        FileSystemType::Auto => img.default_filesystem(),
-                        other => other,
+                    // Raw mode only applies to CP/M, which stores headers in the
+                    // file data; other drivers keep metadata in the directory.
+                    let mounted = AnyFileSystem::mount(img, filesystem_mode);
+                    let data_result: Result<Vec<u8>> = match mounted.as_ref() {
+                        Ok(fs) => {
+                            if raw_mode {
+                                fs.read_file_raw(src_filename)
+                            } else {
+                                fs.read_file(src_filename)
+                            }
+                        }
+                        Err(error) => Err(DskError::filesystem(error.to_string())),
                     };
-
-                    // Read file data
-                    // Raw mode only applies to CP/M filesystems (they have headers in file data)
-                    // MGT filesystems store metadata in directory entries, so raw mode is ignored
-                    let data_result: Result<Vec<u8>> = match effective_fs {
-                        FileSystemType::Mgt => {
-                            match DiscipleFileSystem::new(img) {
-                                Ok(fs) => fs.read_file(src_filename),
-                                Err(e) => Err(e),
-                            }
-                        }
-                        FileSystemType::Trdos => {
-                            match TrdosFileSystem::new(img) {
-                                Ok(fs) => fs.read_file(src_filename),
-                                Err(e) => Err(e),
-                            }
-                        }
-                        FileSystemType::Cpm | FileSystemType::Auto => {
-                            match CpmFileSystem::from_image(img) {
-                                Ok(fs) => {
-                                    if raw_mode {
-                                        fs.read_file_binary(src_filename, true)
-                                    } else {
-                                        fs.read_file(src_filename)
-                                    }
-                                }
-                                Err(e) => Err(e),
-                            }
-                        }
-                    };
+                    let raw_applied = raw_mode
+                        && mounted.as_ref().map(|fs| fs.stores_headers_in_data()).unwrap_or(false);
 
                     match data_result {
                         Ok(data) => {
                             match std::fs::write(&output_path, &data) {
                                 Ok(_) => {
-                                    if raw_mode && matches!(effective_fs, FileSystemType::Cpm | FileSystemType::Auto) {
+                                    if raw_applied {
                                         println!("Exported {} ({} bytes, raw) to {}",
                                             src_filename, data.len(), output_path);
                                     } else {
@@ -785,10 +618,7 @@ fn main() {
                 if parts.len() < 2 {
                     // Show current mode
                     let effective = if let Some(ref img) = image {
-                        match filesystem_mode {
-                            FileSystemType::Auto => img.default_filesystem(),
-                            other => other,
-                        }
+                        AnyFileSystem::resolve(img, filesystem_mode)
                     } else {
                         filesystem_mode
                     };
@@ -1009,6 +839,22 @@ fn parse_command_line(input: &str) -> Vec<String> {
     }
 
     parts
+}
+
+/// Print filesystem accounting for any driver in one consistent layout.
+fn print_filesystem_info(info: &FileSystemInfo) {
+    println!("{} filesystem", info.fs_type);
+    println!("Block size: {} bytes", info.block_size);
+    println!("Total blocks: {}", info.total_blocks);
+    println!(
+        "Usable capacity: {} KB",
+        info.total_blocks * info.block_size / 1024
+    );
+    println!("Free blocks: {}", info.free_blocks);
+    println!(
+        "Free space: {} KB",
+        info.free_blocks * info.block_size / 1024
+    );
 }
 
 /// Pick the filesystem to format: an explicit request wins, otherwise reuse the
