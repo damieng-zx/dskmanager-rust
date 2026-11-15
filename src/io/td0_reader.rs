@@ -38,7 +38,7 @@ pub fn read_td0<P: AsRef<Path>>(path: P) -> Result<DiskImage> {
 
     let mut file = File::open(&path)?;
     let file_size = file.metadata()?.len() as usize;
-    if file_size < HEADER_SIZE || file_size > MAX_FILE_SIZE {
+    if !(HEADER_SIZE..=MAX_FILE_SIZE).contains(&file_size) {
         return Err(DskError::invalid_format(format!(
             "TD0 file has unexpected size {} bytes",
             file_size

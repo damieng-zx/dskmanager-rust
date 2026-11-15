@@ -522,7 +522,7 @@ fn resolve_16sector(disk: &Disk, t0: &Track) -> Option<ProtectionResult> {
                     let end = (start + 22).min(data.len());
                     let extracted: String = data[start..end]
                         .iter()
-                        .filter(|&&b| b >= 32 && b < 127)
+                        .filter(|&&b| (32..127).contains(&b))
                         .map(|&b| b as char)
                         .collect();
                     let cleaned = extracted.trim().to_lowercase();
