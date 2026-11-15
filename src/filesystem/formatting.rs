@@ -51,7 +51,7 @@ fn format_cpm(image: &mut DiskImage) -> Result<()> {
     fill_image(image, sector_size, filler)?;
     let first = spec.reserved_tracks as usize * spec.sectors_per_track as usize;
     let dir_size = spec.directory_blocks as usize * spec.block_size();
-    if dir_size % sector_size != 0 { return Err(DskError::filesystem("Invalid CP/M directory size")); }
+    if !dir_size.is_multiple_of(sector_size) { return Err(DskError::filesystem("Invalid CP/M directory size")); }
     for absolute in first..first + dir_size / sector_size {
         let (side, track, id) = cpm_address(image, &spec, absolute)?;
         image.write_sector(side, track, id, &vec![0xE5; sector_size])?;

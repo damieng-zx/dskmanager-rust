@@ -84,7 +84,7 @@ pub(super) fn cpm_address(image: &DiskImage, spec: &DiskSpecification, absolute:
 
 fn cpm_directory(image: &DiskImage, spec: &DiskSpecification) -> Result<(Vec<(u8,u8,u8)>, Vec<u8>)> {
     let size = spec.directory_entries() * 32;
-    if size == 0 || spec.sector_size == 0 || size % spec.sector_size as usize != 0 {
+    if size == 0 || spec.sector_size == 0 || !size.is_multiple_of(spec.sector_size as usize) {
         return Err(DskError::filesystem("Invalid CP/M directory geometry"));
     }
     let mut addresses = Vec::new();
@@ -115,7 +115,7 @@ fn cpm_import(image: &mut DiskImage, name: &str, data: &[u8]) -> Result<()> {
     let (addresses, mut dir) = cpm_directory(image, &spec)?;
     let block_size = spec.block_size();
     let sector_size = spec.sector_size as usize;
-    if block_size < sector_size || block_size % sector_size != 0 || block_size > 16384 {
+    if block_size < sector_size || !block_size.is_multiple_of(sector_size) || block_size > 16384 {
         return Err(DskError::filesystem("Unsupported CP/M block size"));
     }
     let capacity = match spec.allocation_size { AllocationSize::Byte => 16, AllocationSize::Word => 8 };

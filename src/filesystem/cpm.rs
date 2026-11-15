@@ -249,7 +249,7 @@ impl<'a> CpmFileSystem<'a> {
         if spec.sector_size == 0 {
             return Err(DskError::filesystem("Invalid sector size in disk specification"));
         }
-        if spec.block_size() < spec.sector_size as usize || spec.block_size() % spec.sector_size as usize != 0 {
+        if spec.block_size() < spec.sector_size as usize || !spec.block_size().is_multiple_of(spec.sector_size as usize) {
             return Err(DskError::filesystem("Block size is not a multiple of the sector size"));
         }
         Ok(())

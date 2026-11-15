@@ -135,7 +135,7 @@ fn decode_data_hex(hex: &str) -> std::result::Result<Vec<u8>, String> {
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
-    if trimmed.len() % 2 != 0 {
+    if !trimmed.len().is_multiple_of(2) {
         return Err(format!("Hex data has odd length: {}", trimmed.len()));
     }
     let mut data = Vec::with_capacity(trimmed.len() / 2);
@@ -401,6 +401,15 @@ mod tests {
         assert_eq!(hex, "");
         let decoded = decode_data_hex("").unwrap();
         assert!(decoded.is_empty());
+    }
+
+    #[test]
+    fn test_odd_length_hex_is_rejected() {
+        // The parity check guards against a half-byte; an odd length must fail
+        // rather than silently dropping the trailing nibble.
+        assert!(decode_data_hex("ABC").is_err());
+        assert!(decode_data_hex("AB").is_ok());
+        assert!(decode_data_hex("").is_ok());
     }
 
     #[test]
