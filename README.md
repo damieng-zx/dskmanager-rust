@@ -213,6 +213,10 @@ Contributions welcome! Please ensure:
 3. Code is formatted: `cargo fmt`
 4. No clippy warnings: `cargo clippy --all-targets`
 
+`Cargo.lock` is committed, because this crate ships a binary and the resolved
+dependency graph is part of what users build. If you change a dependency, commit
+the updated lock file with the change.
+
 See [CHANGELOG.md](CHANGELOG.md) for what has changed between releases.
 
 Run the test suite:
