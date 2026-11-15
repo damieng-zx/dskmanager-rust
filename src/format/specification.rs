@@ -963,6 +963,10 @@ mod tests {
     }
 
     /// Build a spec block (first 16 bytes of sector 0) for the PCW/+3 family.
+    ///
+    /// One parameter per on-disk field keeps the call sites aligned with the
+    /// byte layout, which is what these tests are checking.
+    #[allow(clippy::too_many_arguments)]
     fn spec_block(
         format_byte: u8,
         sides_track_bits: u8,
