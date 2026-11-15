@@ -204,13 +204,14 @@ impl Track {
     /// Appends sector data to the provided buffer, reading sectors
     /// in ascending order by their sector ID (as a real FDC would).
     pub fn read_logical(&self, data: &mut Vec<u8>) {
-        let mut sector_ids: Vec<u8> = self.sectors.iter().map(|s| s.id.sector).collect();
-        sector_ids.sort();
+        // Sort by ID but read the physical sectors, not by looking IDs back up:
+        // copy-protected tracks repeat IDs and a map lookup would return the
+        // last duplicate for every occurrence.
+        let mut sectors: Vec<&Sector> = self.sectors.iter().collect();
+        sectors.sort_by_key(|sector| sector.id.sector);
 
-        for sector_id in sector_ids {
-            if let Some(sector) = self.get_sector(sector_id) {
-                data.extend_from_slice(sector.data());
-            }
+        for sector in sectors {
+            data.extend_from_slice(sector.data());
         }
     }
 
@@ -357,6 +358,23 @@ mod tests {
 
         assert_eq!(track.sector_count(), 0);
         assert!(track.is_empty());
+    }
+
+    #[test]
+    fn test_read_logical_keeps_duplicate_sector_ids() {
+        // Copy-protected disks deliberately repeat sector IDs. read_logical
+        // used to re-look each ID up in the map and emit the last duplicate
+        // for every occurrence, dropping the earlier sector's data.
+        let mut track = Track::new(0, 0);
+        track.add_sector(Sector::with_data(SectorId::new(0, 0, 1, 2), vec![0xAA; 512]));
+        track.add_sector(Sector::with_data(SectorId::new(0, 0, 1, 2), vec![0xBB; 512]));
+        track.add_sector(Sector::with_data(SectorId::new(0, 0, 2, 2), vec![0xCC; 512]));
+
+        let data = track.read_logical_to_vec();
+        assert_eq!(data.len(), 3 * 512);
+        assert_eq!(data[..512], [0xAA; 512][..]);
+        assert_eq!(data[512..1024], [0xBB; 512][..]);
+        assert_eq!(data[1024..], [0xCC; 512][..]);
     }
 
     #[test]
