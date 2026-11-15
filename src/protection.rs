@@ -203,16 +203,12 @@ fn classify_t0(t0: &Track) -> T0Class {
         return T0Class::SixteenSector;
     }
 
-    if sc == 8 {
-        if t0.sectors().iter().all(|s| s.advertised_size() == 512) {
-            return T0Class::EightSector;
-        }
+    if sc == 8 && t0.sectors().iter().all(|s| s.advertised_size() == 512) {
+        return T0Class::EightSector;
     }
 
-    if sc == 5 {
-        if t0.sectors().iter().all(|s| s.advertised_size() == 1024) {
-            return T0Class::FiveSector;
-        }
+    if sc == 5 && t0.sectors().iter().all(|s| s.advertised_size() == 1024) {
+        return T0Class::FiveSector;
     }
 
     let has_high_id_filler = t0.sectors().iter().any(|s| {
@@ -301,13 +297,11 @@ fn scan_t0_signatures(t0: &Track) -> Option<ProtectionResult> {
         }
     }
 
-    if t0.sector_count() == 9 {
-        if find_pattern(s0.data(), b"0K free") == Some(2) {
-            return Some(ProtectionResult::confirmed(
-                "ARMOURLOC",
-                "anti-hacker protection",
-            ));
-        }
+    if t0.sector_count() == 9 && find_pattern(s0.data(), b"0K free") == Some(2) {
+        return Some(ProtectionResult::confirmed(
+            "ARMOURLOC",
+            "anti-hacker protection",
+        ));
     }
 
     if sector_contains(s0, b"Disc format (c) 1986 Studio B Ltd.").is_some() {
@@ -1789,6 +1783,62 @@ mod tests {
             ddam_t0.add_sector(s);
         }
         assert_eq!(classify_t0(&ddam_t0), T0Class::TenSectorDDAM);
+    }
+
+    #[test]
+    fn test_armourloc_signature_at_offset_two() {
+        // ARMOURLOC is only recognised when "0K free" starts at exactly offset
+        // 2 of the first sector of a 9-sector track. Build a disk that is not
+        // uniform so detection reaches the signature scan.
+        let build = |offset: usize| {
+            let mut disk = Disk::new(0);
+            let mut t0 = Track::new(0, 0);
+            for r in 1u8..=9 {
+                let mut sector = Sector::new(SectorId::new(0, 0, r, 2));
+                if r == 1 {
+                    let mut data = vec![0xE5u8; 512];
+                    data[offset..offset + 7].copy_from_slice(b"0K free");
+                    sector.set_data(data);
+                }
+                t0.add_sector(sector);
+            }
+            disk.add_track(t0);
+            // A second, differently shaped track breaks uniformity.
+            let mut t1 = Track::new(1, 0);
+            t1.add_sector(Sector::new(SectorId::new(1, 0, 1, 2)));
+            disk.add_track(t1);
+            disk
+        };
+
+        let result = detect(&build(2)).expect("ARMOURLOC should be detected");
+        assert_eq!(result.name, "ARMOURLOC");
+
+        // The same text one byte later must not be mistaken for the signature.
+        assert!(detect(&build(3)).map(|r| r.name != "ARMOURLOC").unwrap_or(true));
+    }
+
+    #[test]
+    fn test_classify_t0_five_and_eight_sector_sizes() {
+        // 8x512 and 5x1024 are distinct classes; other sector sizes on the same
+        // counts fall through to Standard.
+        let mut eight = Track::new(0, 0);
+        for r in 1u8..=8 {
+            eight.add_sector(Sector::new(SectorId::new(0, 0, r, 2)));
+        }
+        assert_eq!(classify_t0(&eight), T0Class::EightSector);
+
+        let mut five = Track::new(0, 0);
+        for r in 1u8..=5 {
+            five.add_sector(Sector::new(SectorId::new(0, 0, r, 3)));
+        }
+        assert_eq!(classify_t0(&five), T0Class::FiveSector);
+
+        // Five sectors of the wrong size must not classify as FiveSector.
+        let mut five_small = Track::new(0, 0);
+        for r in 1u8..=5 {
+            five_small.add_sector(Sector::new(SectorId::new(0, 0, r, 2)));
+        }
+        assert_ne!(classify_t0(&five_small), T0Class::FiveSector);
     }
 
     #[test]
