@@ -434,7 +434,7 @@ impl<'a> CpmFileSystem<'a> {
                 if let Some(sector_data) = Self::logical_sector(self.image, &self.spec, absolute_sector) {
                     data.extend_from_slice(sector_data);
                 } else {
-                    data.extend(std::iter::repeat(0).take(sector_size));
+                    data.extend(std::iter::repeat_n(0, sector_size));
                 }
             }
         }
@@ -858,6 +858,41 @@ mod tests {
         assert!(fs.read_file("HELLO.TXT").is_ok());
         assert!(fs.read_file("hello.txt").is_ok(), "lower-case lookup must resolve");
         assert!(fs.read_file("2:hello.txt").is_err(), "still addresses user 2");
+    }
+
+    #[test]
+    fn test_missing_sector_reads_as_zeroes() {
+        // read_blocks pads a block whose sector is absent with zeroes. Guards the
+        // repeat_n rewrite of that padding.
+        let mut image = DiskImage::builder()
+            .num_tracks(2)
+            .sectors_per_track(2)
+            .build()
+            .unwrap();
+        // Directory entry in block 1 (absolute sector 2) on a 2-track disk, so
+        // the second half of the block lies past the image.
+        let mut directory = [0xE5; 512];
+        directory[..32].fill(0);
+        directory[0] = 0;
+        directory[1..9].copy_from_slice(b"PAD     ");
+        directory[9..12].copy_from_slice(b"BIN");
+        directory[15] = 8;
+        directory[16] = 1;
+        image.write_sector(0, 0, 0xC1, &directory).unwrap();
+
+        let mut spec = DiskSpecification::new();
+        spec.tracks_per_side = 2;
+        spec.sectors_per_track = 2;
+        spec.reserved_tracks = 0;
+        spec.directory_blocks = 1;
+        // Pretend the block is larger than the disk so the tail is missing.
+        spec.block_shift = 4; // 2048-byte blocks = 4 sectors
+        let fs = CpmFileSystem::new(&image, spec).unwrap();
+        // The block spans four sectors but the disk only has two tracks, so the
+        // missing sectors must be padded rather than panic or truncate.
+        let raw = fs.read_file_binary("PAD.BIN", true).unwrap();
+        assert_eq!(raw.len(), 1024);
+        assert!(raw[512..].iter().all(|&b| b == 0), "missing sector must read as zeroes");
     }
 
     #[test]

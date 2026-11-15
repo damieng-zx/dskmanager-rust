@@ -499,7 +499,7 @@ mod tests {
             track[sib + 6] = (SECTOR_SIZE & 0xFF) as u8; // stored length low
             track[sib + 7] = (SECTOR_SIZE >> 8) as u8; // stored length high
         }
-        track.extend(std::iter::repeat(0xE5).take(SECTORS * SECTOR_SIZE));
+        track.extend(std::iter::repeat_n(0xE5, SECTORS * SECTOR_SIZE));
         buf.extend_from_slice(&track);
         // Track 1 is deliberately absent from the file (genuinely unformatted).
 
@@ -550,7 +550,7 @@ mod tests {
             track[sib + 6] = (SECTOR_SIZE & 0xFF) as u8;
             track[sib + 7] = (SECTOR_SIZE >> 8) as u8;
         }
-        track.extend(std::iter::repeat(0xE5).take(SECTORS * SECTOR_SIZE));
+        track.extend(std::iter::repeat_n(0xE5, SECTORS * SECTOR_SIZE));
         buf.extend_from_slice(&track);
         buf
     }
@@ -595,7 +595,7 @@ mod tests {
             track[sib + 7] = 0x55;
         }
         for i in 0..SECTORS {
-            track.extend(std::iter::repeat(0x30 + i as u8).take(SECTOR_SIZE));
+            track.extend(std::iter::repeat_n(0x30 + i as u8, SECTOR_SIZE));
         }
         buf.extend_from_slice(&track);
 
