@@ -122,16 +122,16 @@ fn cpm_import(image: &mut DiskImage, name: &str, data: &[u8]) -> Result<()> {
     let blocks_per_extent = capacity.min(16384 / block_size);
     let bytes_per_extent = blocks_per_extent * block_size;
     let extents = data.len().max(1).div_ceil(bytes_per_extent);
-    if extents > 2048 || extents > dir.chunks_exact(32).filter(|e| e[0] == 0xE5).count() {
+    if extents > 2048 || extents > dir.as_chunks::<32>().0.iter().filter(|e| e[0] == 0xE5).count() {
         return Err(DskError::DiskFull);
     }
     let mut used = HashSet::new();
     for block in 0..spec.directory_blocks as u16 { used.insert(block); }
-    for entry in dir.chunks_exact(32).filter(|e| e[0] <= 31) {
+    for entry in dir.as_chunks::<32>().0.iter().filter(|e| e[0] <= 31) {
         if cpm_matches(entry, user, &name) { return Err(DskError::filesystem("File already exists")); }
         match spec.allocation_size {
             AllocationSize::Byte => { for &b in &entry[16..32] { if b != 0 { used.insert(b as u16); } } }
-            AllocationSize::Word => { for p in entry[16..32].chunks_exact(2) {
+            AllocationSize::Word => { for p in entry[16..32].as_chunks::<2>().0 {
                 let b = u16::from_le_bytes([p[0], p[1]]); if b != 0 { used.insert(b); }
             } }
         }
@@ -141,7 +141,7 @@ fn cpm_import(image: &mut DiskImage, name: &str, data: &[u8]) -> Result<()> {
     let free: Vec<_> = (1..count).filter(|b| !used.contains(b)).take(needed).collect();
     if free.len() != needed { return Err(DskError::DiskFull); }
     for (extent_number, chunk) in data.chunks(bytes_per_extent).enumerate() {
-        let slot = dir.chunks_exact_mut(32).find(|e| e[0] == 0xE5).ok_or(DskError::DiskFull)?;
+        let slot = dir.as_chunks_mut::<32>().0.iter_mut().find(|e| e[0] == 0xE5).ok_or(DskError::DiskFull)?;
         slot.fill(0);
         slot[0] = user;
         slot[1..12].copy_from_slice(&name);
@@ -157,7 +157,7 @@ fn cpm_import(image: &mut DiskImage, name: &str, data: &[u8]) -> Result<()> {
         }
     }
     if data.is_empty() {
-        let slot = dir.chunks_exact_mut(32).find(|e| e[0] == 0xE5).ok_or(DskError::DiskFull)?;
+        let slot = dir.as_chunks_mut::<32>().0.iter_mut().find(|e| e[0] == 0xE5).ok_or(DskError::DiskFull)?;
         slot.fill(0); slot[0] = user; slot[1..12].copy_from_slice(&name);
     }
     for (index, &block) in free.iter().enumerate() {
@@ -181,7 +181,7 @@ fn cpm_delete(image: &mut DiskImage, name: &str) -> Result<()> {
     let spec = DiskSpecification::identify(image);
     let (addresses, mut dir) = cpm_directory(image, &spec)?;
     let mut found = false;
-    for entry in dir.chunks_exact_mut(32) {
+    for entry in dir.as_chunks_mut::<32>().0.iter_mut() {
         if cpm_matches(entry, user, &name_bytes) { entry[0] = 0xE5; found = true; }
     }
     if !found { return Err(DskError::FileNotFound(name.to_string())); }
