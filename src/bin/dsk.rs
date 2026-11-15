@@ -756,17 +756,25 @@ fn main() {
             }
             "fs-format" => {
                 if let Some(ref mut img) = image {
-                    let mode = if let Some(arg) = parts.get(1) {
+                    let requested = if let Some(arg) = parts.get(1) {
                         match FileSystemType::from_str(arg) {
-                            Some(mode) => mode,
+                            Some(mode) => Some(mode),
                             None => {
                                 println!("Usage: fs-format [auto|cpm|mgt|trdos]");
                                 continue;
                             }
                         }
-                    } else { filesystem_mode };
+                    } else { None };
+                    let mode = resolve_format_mode(filesystem_mode, requested);
                     match filesystem::format_filesystem(img, mode) {
-                        Ok(()) => println!("Filesystem formatted ({}). All previous files erased.", mode),
+                        Ok(()) => {
+                            // An explicit argument also selects the new driver so
+                            // later commands read the freshly formatted disk.
+                            if requested.is_some() {
+                                filesystem_mode = mode;
+                            }
+                            println!("Filesystem formatted ({}). All previous files erased.", mode);
+                        }
                         Err(e) => println!("Error: {}", e),
                     }
                 } else {
@@ -1002,6 +1010,12 @@ fn parse_command_line(input: &str) -> Vec<String> {
     }
 
     parts
+}
+
+/// Pick the filesystem to format: an explicit request wins, otherwise reuse the
+/// session mode.
+fn resolve_format_mode(current: FileSystemType, requested: Option<FileSystemType>) -> FileSystemType {
+    requested.unwrap_or(current)
 }
 
 fn print_help() {
@@ -1466,6 +1480,21 @@ fn find_strings_in_track(
 #[cfg(test)]
 mod sector_edit_tests {
     use super::*;
+
+    #[test]
+    fn fs_format_argument_selects_the_mode_for_later_commands() {
+        // `fs-format mgt` used to format as MGT but leave the session mode on
+        // auto, so the next fs-list parsed the fresh disk with the old driver.
+        assert_eq!(
+            resolve_format_mode(FileSystemType::Auto, Some(FileSystemType::Mgt)),
+            FileSystemType::Mgt
+        );
+        // Without an argument the current mode is reused unchanged.
+        assert_eq!(
+            resolve_format_mode(FileSystemType::Cpm, None),
+            FileSystemType::Cpm
+        );
+    }
 
     #[test]
     fn sector_data_and_status_survive_save() {
