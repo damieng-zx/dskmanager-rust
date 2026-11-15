@@ -387,13 +387,15 @@ impl<'a> CpmFileSystem<'a> {
     }
 
     /// Bare names address user 0; `N:NAME.EXT` selects another CP/M user.
+    ///
+    /// CP/M names are stored upper-case, so the lookup is case-insensitive.
     fn file_key(name: &str) -> Result<(u8, String)> {
         if let Some((user, filename)) = name.split_once(':') {
             let user = user.parse::<u8>().ok().filter(|&u| u <= 31)
                 .ok_or_else(|| DskError::filesystem("Invalid CP/M user number"))?;
-            Ok((user, filename.to_string()))
+            Ok((user, filename.to_uppercase()))
         } else {
-            Ok((0, name.to_string()))
+            Ok((0, name.to_uppercase()))
         }
     }
 
@@ -825,6 +827,38 @@ mod tests {
         assert!(fs.read_dir().is_ok());
         // Sanity: the accounting must stay on-disk.
         assert_eq!(fs.info().total_blocks, 0);
+    }
+
+    #[test]
+    fn test_file_lookup_is_case_insensitive() {
+        // Import upper-cases the name, but lookups compared it literally, so
+        // `fs-read hello.txt` for a file imported as hello.txt reported
+        // "File not found".
+        let mut image = DiskImage::builder()
+            .num_tracks(4)
+            .sectors_per_track(2)
+            .build()
+            .unwrap();
+        let mut directory = [0xE5; 512];
+        directory[..32].fill(0);
+        directory[0] = 0;
+        directory[1..9].copy_from_slice(b"HELLO   ");
+        directory[9..12].copy_from_slice(b"TXT");
+        directory[15] = 8;
+        directory[16] = 1;
+        image.write_sector(0, 0, 0xC1, &directory).unwrap();
+        image.write_sector(0, 1, 0xC1, &[0x11; 512]).unwrap();
+
+        let mut spec = DiskSpecification::new();
+        spec.tracks_per_side = 4;
+        spec.sectors_per_track = 2;
+        spec.reserved_tracks = 0;
+        spec.directory_blocks = 1;
+        let fs = CpmFileSystem::new(&image, spec).unwrap();
+
+        assert!(fs.read_file("HELLO.TXT").is_ok());
+        assert!(fs.read_file("hello.txt").is_ok(), "lower-case lookup must resolve");
+        assert!(fs.read_file("2:hello.txt").is_err(), "still addresses user 2");
     }
 
     #[test]
