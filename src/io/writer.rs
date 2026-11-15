@@ -271,10 +271,19 @@ fn write_extended_dsk(file: &mut File, image: &DiskImage) -> Result<()> {
         for disk in &image.disks {
             if let Some(track) = disk.get_track(track_num) {
                 let track_size = calculate_single_track_size(track);
-                let size_units = ((track_size + 255) / 256) as u8; // Round up
+                // Track lengths are recorded in 256-byte units in a single byte.
+                // Rejecting an oversized track is better than writing a wrapped
+                // value that shifts every following track in the file.
+                let size_units = track_size.div_ceil(256);
+                if size_units > u8::MAX as usize {
+                    return Err(crate::error::DskError::UnsupportedFormat(format!(
+                        "Track {} side {} needs {} bytes, more than an Extended DSK size entry can describe",
+                        track.track_number, track.side_number, track_size
+                    )));
+                }
                 let offset = DISK_INFO_EXT_TRACK_SIZE_OFFSET + track_index;
                 if offset < disk_info.len() {
-                    disk_info[offset] = size_units;
+                    disk_info[offset] = size_units as u8;
                 }
                 track_index += 1;
             }
@@ -290,7 +299,7 @@ fn write_extended_dsk(file: &mut File, image: &DiskImage) -> Result<()> {
                 let track_size = calculate_single_track_size(track);
                 // Extended DSK track lengths are recorded in 256-byte units. The
                 // next track must start at the offset advertised by the table.
-                let padded_size = (track_size + 255) / 256 * 256;
+                let padded_size = track_size.div_ceil(256) * 256;
                 write_track(file, track, padded_size)?;
             }
         }
@@ -535,6 +544,36 @@ mod tests {
         let bytes = std::fs::read(&path).unwrap();
         std::fs::remove_file(&path).ok();
         assert_eq!(bytes[9], 1, "two sides must be recorded as sides - 1");
+    }
+
+    #[test]
+    fn test_oversized_track_is_reported_not_truncated() {
+        // The Extended DSK size table stores a track's length in single bytes of
+        // 256-byte units. A track too large for that field used to be written
+        // with a wrapped value, so the reader lost track of every later track.
+        use crate::image::{Sector, SectorId};
+
+        let mut image = DiskImage::builder()
+            .format(DiskImageFormat::ExtendedDSK)
+            .num_tracks(2)
+            .sectors_per_track(0)
+            .build()
+            .unwrap();
+        {
+            let track = image.get_disk_mut(0).unwrap().get_track_mut(0).unwrap();
+            // 120 x 6144-byte sectors = 720 KB, well over 255 x 256 units.
+            for i in 0..120u8 {
+                let id = SectorId::new(0, 0, i, 6); // size code 6 -> 8192 advertised
+                track.add_sector(Sector::with_data(id, vec![0x5A; 6144]));
+            }
+        }
+
+        let path = std::env::temp_dir().join(format!("dskmgr_bigtrack_{}.dsk", std::process::id()));
+        let saved = image.save(&path);
+        if path.exists() {
+            std::fs::remove_file(&path).ok();
+        }
+        assert!(saved.is_err(), "a track larger than the size field allows must be rejected");
     }
 
     #[test]

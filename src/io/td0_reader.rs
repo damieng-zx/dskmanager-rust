@@ -347,7 +347,7 @@ fn decode_lzw_stream(data: &[u8]) -> Result<Vec<u8>> {
         if bit_length == 0 {
             break;
         }
-        let byte_length = (bit_length + 1) / 2;
+        let byte_length = bit_length.div_ceil(2);
         let block = data
             .get(cursor..cursor + byte_length)
             .ok_or_else(|| DskError::parse(cursor, "Short TD0 LZW block"))?;
@@ -507,7 +507,8 @@ impl<'a> LzhufDecoder<'a> {
         let mut j = 0;
         for i in 0..627 {
             if self.son[i] >= 627 {
-                self.freq[j] = (self.freq[i] + 1) / 2;
+                // ceil(freq / 2), written without an overflow-prone +1.
+                self.freq[j] = self.freq[i].div_ceil(2);
                 self.son[j] = self.son[i];
                 j += 1;
             }
