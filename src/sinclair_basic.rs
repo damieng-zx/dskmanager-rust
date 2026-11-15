@@ -475,6 +475,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_token_table_is_complete_and_well_formed() {
+        // Every token 0xA5..=0xFF must name a keyword, and no two may share a
+        // name; 0x00..=0x9F are character codes rather than keywords.
+        use std::collections::HashMap;
+
+        let mut seen: HashMap<&'static str, u8> = HashMap::new();
+        for token in 0xA5u8..=0xFF {
+            let text = get_token_text(token, SinclairBasicMode::Mode128K)
+                .unwrap_or_else(|e| panic!("token 0x{token:02X} failed: {e}"));
+            assert!(!text.is_empty(), "token 0x{token:02X} is empty");
+            if let Some(previous) = seen.insert(text, token) {
+                panic!("tokens 0x{previous:02X} and 0x{token:02X} both decode to {text:?}");
+            }
+        }
+    }
+
+    #[test]
     fn test_spectrum_float_decoding() {
         // The decoder reconstructed the mantissa but scaled it by 2^31 instead
         // of 2^32, so every value came out doubled (and negative-by-default for

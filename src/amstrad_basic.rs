@@ -593,14 +593,14 @@ fn get_token_text(token: u8) -> Result<&'static str> {
         0xDF => Ok("MASK"),
         0xE0 => Ok("FRAME"),
         0xE1 => Ok("CURSOR"),
-        0xE2 => Ok(""), // Not used
+        // 0xE2 is unassigned in Locomotive BASIC.
         0xE3 => Ok("ERL"),
         0xE4 => Ok("FN"),
         0xE5 => Ok("SPC"),
         0xE6 => Ok("STEP"),
         0xE7 => Ok("SWAP"),
-        0xE8 => Ok(""), // Not used
-        0xE9 => Ok(""), // Not used
+        // 0xE8 is unassigned in Locomotive BASIC.
+        // 0xE9 is unassigned in Locomotive BASIC.
         0xEA => Ok("TAB"),
         0xEB => Ok("THEN"),
         0xEC => Ok("TO"),
@@ -716,5 +716,51 @@ mod tests {
             let decoded = decode_amstrad_basic(&program(&[token])).unwrap();
             assert_eq!(decoded, format!("10 {}\n", text), "token 0x{:02X}", token);
         }
+    }
+
+    #[test]
+    fn test_token_table_is_complete_and_well_formed() {
+        // Every single-byte and 0xFF-prefixed token must decode to a non-empty
+        // name, and no two tokens may share a name (a sign of a transcription
+        // slip in the table).
+        use std::collections::HashMap;
+
+        let mut seen: HashMap<&'static str, u8> = HashMap::new();
+        // Locomotive BASIC leaves these three opcodes unassigned; decoding them
+        // reports an error rather than silently emitting nothing.
+        const UNASSIGNED: [u8; 3] = [0xE2, 0xE8, 0xE9];
+
+        for token in 0x80u8..=0xFE {
+            if UNASSIGNED.contains(&token) {
+                assert!(
+                    get_token_text(token).is_err(),
+                    "unassigned token 0x{token:02X} should not decode"
+                );
+                continue;
+            }
+            let text = get_token_text(token)
+                .unwrap_or_else(|e| panic!("token 0x{token:02X} failed: {e}"));
+            assert!(!text.is_empty(), "token 0x{token:02X} is empty");
+            if let Some(previous) = seen.insert(text, token) {
+                panic!("tokens 0x{previous:02X} and 0x{token:02X} both decode to {text:?}");
+            }
+        }
+
+        // The 0xFF prefix table covers a separate range; check it is non-empty
+        // and that its entries are distinct too.
+        let mut prefixed = 0;
+        let mut prefixed_names: HashMap<&'static str, u8> = HashMap::new();
+        for token in 0u8..=0xFF {
+            if let Ok(text) = get_token_text_ff_prefix(token) {
+                assert!(!text.is_empty(), "prefixed token 0x{token:02X} is empty");
+                prefixed += 1;
+                if let Some(previous) = prefixed_names.insert(text, token) {
+                    panic!(
+                        "prefixed tokens 0x{previous:02X} and 0x{token:02X} both decode to {text:?}"
+                    );
+                }
+            }
+        }
+        assert!(prefixed > 0, "the 0xFF prefix table is empty");
     }
 }
