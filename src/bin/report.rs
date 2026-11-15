@@ -103,68 +103,58 @@ impl Filters {
             }
         }
 
-        for disk in image.disks() {
-            if let Some(tracks) = self.tracks {
-                if disk.track_count() != tracks {
-                    return false;
-                }
+        // The remaining filters describe per-side characteristics. A disk
+        // matches when *any* of its sides satisfies each enabled filter;
+        // requiring every side to match hid errors on a single side.
+        if let Some(tracks) = self.tracks {
+            if !image.disks().iter().any(|disk| disk.track_count() == tracks) {
+                return false;
             }
+        }
 
-            if let Some(sector_size) = self.sector_size {
-                if let Some(t0) = disk.get_track(0) {
-                    if let Some(s0) = t0.get_sector_by_index(0) {
-                        if s0.advertised_size() != sector_size {
-                            return false;
-                        }
-                    }
-                }
+        if let Some(sector_size) = self.sector_size {
+            let any_match = image.disks().iter().any(|disk| {
+                disk.get_track(0)
+                    .and_then(|t0| t0.get_sector_by_index(0))
+                    .map(|s0| s0.advertised_size() == sector_size)
+                    .unwrap_or(false)
+            });
+            if !any_match {
+                return false;
             }
+        }
 
-            if let Some(ref prot_filter) = self.protection {
+        if let Some(ref prot_filter) = self.protection {
+            let any_match = image.disks().iter().any(|disk| {
                 let detected = protection::detect(disk);
                 match prot_filter {
-                    None => {
-                        if detected.is_none() {
-                            return false;
-                        }
-                    }
-                    Some(ref text) => {
-                        let name = detected.as_ref().map(|d| d.name.as_str()).unwrap_or("");
-                        if !name.to_ascii_lowercase().contains(&text.to_ascii_lowercase()) {
-                            return false;
-                        }
-                    }
+                    None => detected.is_some(),
+                    Some(ref text) => detected
+                        .as_ref()
+                        .map(|d| d.name.to_ascii_lowercase().contains(&text.to_ascii_lowercase()))
+                        .unwrap_or(false),
                 }
+            });
+            if !any_match {
+                return false;
             }
+        }
 
-            if self.has_errors {
-                let mut found = false;
-                for t_idx in 0..disk.track_count() {
-                    if let Some(track) = disk.get_track(t_idx as u8) {
-                        for s_idx in 0..track.sector_count() {
-                            if let Some(sector) = track.get_sector_by_index(s_idx) {
-                                if sector.has_error() {
-                                    found = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    if found {
-                        break;
-                    }
-                }
-                if !found {
-                    return false;
-                }
+        if self.has_errors {
+            let any_match = image.disks().iter().any(|disk| {
+                disk.tracks().iter().any(|track| {
+                    track.sectors().iter().any(|sector| sector.has_error())
+                })
+            });
+            if !any_match {
+                return false;
             }
+        }
 
-            if self.quirks {
-                let spec = DiskSpecification::identify(image);
-                let quirks = md_quirks(image, &spec);
-                if quirks.is_empty() {
-                    return false;
-                }
+        if self.quirks {
+            let spec = DiskSpecification::identify(image);
+            if md_quirks(image, &spec).is_empty() {
+                return false;
             }
         }
 
@@ -647,6 +637,34 @@ fn open_bytes(bytes: &[u8], extension: &str) -> std::result::Result<DiskImage, S
 #[cfg(test)]
 mod format_tests {
     use super::*;
+
+    #[test]
+    fn filters_match_a_disk_with_the_quirk_on_any_side() {
+        // The filters returned false as soon as one side failed the check, so a
+        // 2-sided image with a CRC error only on side 1 was excluded.
+        use dskmanager::{DiskImage, FdcStatus1, FormatSpec};
+
+        let mut image = DiskImage::create(FormatSpec::amstrad_data_ds()).unwrap();
+        image
+            .get_disk_mut(1)
+            .unwrap()
+            .get_track_mut(5)
+            .unwrap()
+            .get_sector_mut(0xC1)
+            .unwrap()
+            .fdc_status1 = FdcStatus1::new(FdcStatus1::DE);
+
+        let filters = Filters {
+            format: None,
+            tracks: None,
+            sides: None,
+            sector_size: None,
+            protection: None,
+            has_errors: true,
+            quirks: false,
+        };
+        assert!(filters.matches(&image), "an error on side 1 must match");
+    }
 
     #[test]
     fn recognizes_all_image_extensions() {
