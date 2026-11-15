@@ -1,4 +1,4 @@
-﻿//! Interactive DSK console application
+//! Interactive DSK console application
 
 use dskmanager::filesystem::AnyFileSystem;
 use dskmanager::*;
@@ -634,9 +634,9 @@ fn main() {
                                 String::new()
                             };
                             if result.details.is_empty() {
-                                println!("{}{} [{}]", prefix, result.name, result.reason);
+                                println!("{}{} [{}]", prefix, result.name, result.qualified_reason());
                             } else {
-                                println!("{}{} [{}]", prefix, result.name, result.reason);
+                                println!("{}{} [{}]", prefix, result.name, result.qualified_reason());
                                 for line in &result.details {
                                     println!("  {}", line);
                                 }

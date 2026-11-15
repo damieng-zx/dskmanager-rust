@@ -7,45 +7,90 @@
 use crate::image::{Disk, Sector, Track};
 
 /// Result of copy protection detection
+/// How strongly a protection scheme was identified.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Confidence {
+    /// The disk matches a distinctive fingerprint; no signature was needed.
+    Confirmed,
+    /// The structure strongly suggests the scheme but no signature was found.
+    Probable,
+    /// Only a structural hint; may be another scheme entirely.
+    Maybe,
+}
+
+impl Confidence {
+    /// The adverb prefixed to a reason when rendered as text.
+    fn adverb(self) -> Option<&'static str> {
+        match self {
+            Self::Confirmed => None,
+            Self::Probable => Some("probably"),
+            Self::Maybe => Some("maybe"),
+        }
+    }
+}
+
+impl std::fmt::Display for Confidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Confirmed => write!(f, "confirmed"),
+            Self::Probable => write!(f, "probable"),
+            Self::Maybe => write!(f, "maybe"),
+        }
+    }
+}
+
+/// Result of copy protection detection
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProtectionResult {
     /// Name of the detected protection scheme
     pub name: String,
-    /// Description of why this protection was detected
+    /// How strongly the scheme was identified
+    pub confidence: Confidence,
+    /// Description of why this protection was detected, without the confidence
+    /// qualifier (callers that want it can prepend [`Confidence::adverb`]).
     pub reason: String,
     /// Extra detail lines (e.g. Alkatraz protection track analysis)
     pub details: Vec<String>,
 }
 
 impl ProtectionResult {
-    fn confirmed(name: impl Into<String>, reason: impl Into<String>) -> Self {
+    fn build(
+        confidence: Confidence,
+        name: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
+            confidence,
             reason: reason.into(),
             details: Vec::new(),
         }
     }
 
+    fn confirmed(name: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self::build(Confidence::Confirmed, name, reason)
+    }
+
     fn probable(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            reason: format!("probably, {}", reason.into()),
-            details: Vec::new(),
-        }
+        Self::build(Confidence::Probable, name, reason)
     }
 
     fn maybe(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            reason: format!("maybe, {}", reason.into()),
-            details: Vec::new(),
+        Self::build(Confidence::Maybe, name, reason)
+    }
+
+    /// The reason as displayed, prefixed by its confidence when not confirmed.
+    pub fn qualified_reason(&self) -> String {
+        match self.confidence.adverb() {
+            Some(adverb) => format!("{}, {}", adverb, self.reason),
+            None => self.reason.clone(),
         }
     }
 }
 
 impl std::fmt::Display for ProtectionResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} ({})", self.name, self.reason)?;
+        write!(f, "{} ({})", self.name, self.qualified_reason())?;
         for line in &self.details {
             write!(f, "\n  {}", line)?;
         }
@@ -1412,13 +1457,9 @@ fn detect_inner(disk: &Disk) -> Option<ProtectionResult> {
 }
 
 impl ProtectionResult {
-    /// Create a new protection result
+    /// Create a new protection result with confirmed confidence.
     pub fn new(name: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            reason: reason.into(),
-            details: Vec::new(),
-        }
+        Self::build(Confidence::Confirmed, name, reason)
     }
 }
 
@@ -1496,6 +1537,34 @@ mod tests {
     fn test_protection_result_display() {
         let result = ProtectionResult::new("Speedlock 1987", "signed T0/S0 +42");
         assert_eq!(result.to_string(), "Speedlock 1987 (signed T0/S0 +42)");
+    }
+
+    #[test]
+    fn confidence_is_a_field_not_part_of_the_reason() {
+        // The qualifier used to be baked into `reason`, so the reason text and
+        // its confidence could not be consumed separately.
+        let confirmed = ProtectionResult::confirmed("Alkatraz +3", "signed T0/S0");
+        assert_eq!(confirmed.confidence, Confidence::Confirmed);
+        assert_eq!(confirmed.reason, "signed T0/S0");
+        assert_eq!(confirmed.qualified_reason(), "signed T0/S0");
+        assert_eq!(confirmed.to_string(), "Alkatraz +3 (signed T0/S0)");
+
+        let probable = ProtectionResult::probable("Speedlock +3 1987", "unsigned");
+        assert_eq!(probable.confidence, Confidence::Probable);
+        assert_eq!(probable.reason, "unsigned", "reason stays unqualified");
+        assert_eq!(probable.qualified_reason(), "probably, unsigned");
+        assert_eq!(probable.to_string(), "Speedlock +3 1987 (probably, unsigned)");
+
+        let maybe = ProtectionResult::maybe("P.M.S. Loader", "T2 used");
+        assert_eq!(maybe.confidence, Confidence::Maybe);
+        assert_eq!(maybe.qualified_reason(), "maybe, T2 used");
+    }
+
+    #[test]
+    fn confidence_orders_from_confirmed_to_maybe() {
+        // Useful for ranking or filtering without parsing strings.
+        assert!(Confidence::Confirmed < Confidence::Probable);
+        assert!(Confidence::Probable < Confidence::Maybe);
     }
 
     #[test]

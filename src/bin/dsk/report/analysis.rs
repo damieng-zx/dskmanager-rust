@@ -59,9 +59,9 @@ impl DiskAnalysis {
             .iter()
             .map(|(side, found)| {
                 if multi_side {
-                    format!("Side {}: {} ({})", side, found.name, found.reason)
+                    format!("Side {}: {} ({})", side, found.name, found.qualified_reason())
                 } else {
-                    format!("{} ({})", found.name, found.reason)
+                    format!("{} ({})", found.name, found.qualified_reason())
                 }
             })
             .collect::<Vec<_>>()
@@ -89,7 +89,7 @@ impl DiskAnalysis {
         self.protections
             .iter()
             .map(|(_, found)| {
-                let mut entry = format!("{} | {}", found.name, found.reason);
+                let mut entry = format!("{} | {}", found.name, found.qualified_reason());
                 if !found.details.is_empty() {
                     entry.push_str(" | ");
                     entry.push_str(&found.details.join(" | "));
