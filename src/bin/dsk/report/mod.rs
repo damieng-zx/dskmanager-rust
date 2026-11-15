@@ -460,33 +460,108 @@ fn walk_dir(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn expand_glob(pattern: &str) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-
     let root = glob_root(pattern);
     if !root.is_dir() {
         eprintln!("Glob base directory not found: {}", root.display());
-        return files;
+        return Vec::new();
     }
 
-    let mut cmd = std::process::Command::new("cmd");
-    cmd.args(["/C", "dir", "/B", "/S", pattern]);
-    let output = match cmd.output() {
-        Ok(o) => o,
-        Err(_) => return files,
+    // Match against the pattern's path components below the fixed root, so a
+    // wildcard in a directory name works as well as one in the file name.
+    let Ok(relative) = Path::new(pattern).strip_prefix(&root) else {
+        return Vec::new();
     };
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        let path = PathBuf::from(line.trim());
-        if !path.is_file() {
-            continue;
-        }
-        let ext = path.extension().and_then(|e| e.to_str()).map(|s| s.to_ascii_lowercase());
-        if ext.as_deref().map(is_image_extension).unwrap_or(false) || ext.as_deref() == Some("zip") {
-            files.push(path);
-        }
-    }
+    let pattern_parts: Vec<String> = relative
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect();
+
+    let mut files = Vec::new();
+    collect_glob(&root, &pattern_parts, &mut files);
     files.sort();
     files
+}
+
+/// Recursively collect files under `dir` whose path matches `parts`.
+///
+/// A literal component must match exactly and descends into that entry; a
+/// component containing `*` or `?` matches whole entries (`*` = any run of
+/// characters, `?` = one character) and continues from there.
+fn collect_glob(dir: &Path, parts: &[String], out: &mut Vec<PathBuf>) {
+    let Some((first, rest)) = parts.split_first() else {
+        return;
+    };
+
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    let wildcard = first.contains('*') || first.contains('?');
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !glob_component_matches(first, &name) {
+            continue;
+        }
+
+        if rest.is_empty() {
+            if path.is_file() && is_reportable(&path) {
+                out.push(path);
+            }
+        } else {
+            // A wildcard component matches entries of either kind; a literal one
+            // must be a directory to have anything below it.
+            if wildcard && path.is_file() {
+                continue;
+            }
+            if path.is_dir() {
+                collect_glob(&path, rest, out);
+            }
+        }
+    }
+}
+
+/// Match one path component against a `*`/`?` pattern.
+fn glob_component_matches(pattern: &str, name: &str) -> bool {
+    // Classic iterative matcher: backtrack on the last `*` rather than recursing.
+    let (pattern, name): (Vec<char>, Vec<char>) =
+        (pattern.chars().collect(), name.chars().collect());
+    let (mut p, mut n) = (0usize, 0usize);
+    let mut star: Option<usize> = None;
+    let mut resume = 0usize;
+
+    while n < name.len() {
+        if p < pattern.len() && (pattern[p] == '?' || pattern[p] == name[n]) {
+            p += 1;
+            n += 1;
+        } else if p < pattern.len() && pattern[p] == '*' {
+            star = Some(p);
+            resume = n;
+            p += 1;
+        } else if let Some(star_pos) = star {
+            p = star_pos + 1;
+            resume += 1;
+            n = resume;
+        } else {
+            return false;
+        }
+    }
+
+    while p < pattern.len() && pattern[p] == '*' {
+        p += 1;
+    }
+    p == pattern.len()
+}
+
+/// Whether a path looks like a disk image or archive the report can read.
+fn is_reportable(path: &Path) -> bool {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(extension) => {
+            is_image_extension(extension) || extension.eq_ignore_ascii_case("zip")
+        }
+        None => false,
+    }
 }
 
 fn glob_root(pattern: &str) -> PathBuf {
@@ -506,12 +581,29 @@ fn glob_root(pattern: &str) -> PathBuf {
     }
 }
 
+/// Deepest directory that contains every file in `files`.
+///
+/// This is what report titles are made relative to, so it has to be the shared
+/// ancestor rather than the first file's parent: with `a/z.dsk` and `b.dsk`
+/// sorted first, the latter put unrelated files under a fabricated folder.
 fn common_root(files: &[PathBuf]) -> PathBuf {
-    if files.is_empty() {
+    let Some(first) = files.first() else {
         return PathBuf::from(".");
+    };
+
+    let mut common: Vec<_> = first.parent().map(|p| p.components().collect()).unwrap_or_default();
+
+    for file in &files[1..] {
+        let components: Vec<_> = file.parent().map(|p| p.components().collect()).unwrap_or_default();
+        let shared = common
+            .iter()
+            .zip(components.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        common.truncate(shared);
     }
-    let mut root = files[0].clone();
-    root.pop();
+
+    let root: PathBuf = common.into_iter().collect();
     if root.as_os_str().is_empty() {
         PathBuf::from(".")
     } else {
@@ -644,6 +736,67 @@ fn open_bytes(bytes: &[u8], extension: &str) -> std::result::Result<DiskImage, S
 #[cfg(test)]
 mod format_tests {
     use super::*;
+
+    #[test]
+    fn glob_component_matches_supports_star_and_question() {
+        assert!(glob_component_matches("*.dsk", "game.dsk"));
+        assert!(glob_component_matches("game.*", "game.dsk"));
+        assert!(glob_component_matches("*", "anything"));
+        assert!(glob_component_matches("g?me.dsk", "game.dsk"));
+        assert!(glob_component_matches("g*e.dsk", "game.dsk"));
+        assert!(!glob_component_matches("g?me.dsk", "gme.dsk"));
+        assert!(!glob_component_matches("*.dsk", "game.trd"));
+        assert!(glob_component_matches("exact.dsk", "exact.dsk"));
+        assert!(!glob_component_matches("exact.dsk", "other.dsk"));
+    }
+
+    #[test]
+    fn expand_glob_walks_matching_files_without_a_subprocess() {
+        let base = std::env::temp_dir().join(format!("dskmgr_glob_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(base.join("sub")).unwrap();
+        fs::write(base.join("one.dsk"), b"x").unwrap();
+        fs::write(base.join("two.trd"), b"x").unwrap();
+        fs::write(base.join("notes.txt"), b"x").unwrap();
+        fs::write(base.join("sub").join("three.dsk"), b"x").unwrap();
+
+        let pattern = base.join("*.dsk").to_string_lossy().into_owned();
+        let found = expand_glob(&pattern);
+        let names: Vec<String> = found
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["one.dsk"], "only top-level .dsk files");
+
+        // A wildcard on a directory component descends into it.
+        let pattern = base.join("*").join("*.dsk").to_string_lossy().into_owned();
+        let found = expand_glob(&pattern);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].ends_with(Path::new("sub").join("three.dsk")));
+
+        fs::remove_dir_all(&base).ok();
+    }
+
+    #[test]
+    fn common_root_is_the_shared_ancestor() {
+        let root = Path::new("root");
+        // Files in different folders share `root`, not the first file's parent.
+        let files = vec![root.join("a").join("z.dsk"), root.join("b.dsk")];
+        assert_eq!(common_root(&files), root);
+
+        // All inside one folder: that folder is the root.
+        let files = vec![root.join("a").join("x.dsk"), root.join("a").join("y.dsk")];
+        assert_eq!(common_root(&files), root.join("a"));
+
+        assert_eq!(common_root(&[]), PathBuf::from("."));
+    }
+
+    #[test]
+    fn top_folder_groups_by_first_component() {
+        let root = Path::new("root");
+        assert_eq!(top_folder(root, &root.join("a").join("x.dsk")), "a");
+        assert_eq!(top_folder(root, &root.join("x.dsk")), "(root)");
+    }
 
     #[test]
     fn quirks_use_the_images_own_filler_byte() {
