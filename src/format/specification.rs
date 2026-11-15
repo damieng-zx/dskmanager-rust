@@ -659,26 +659,31 @@ fn parse_spec_block(spec: &mut DiskSpecification, sector_data: &[u8]) {
     }
 }
 
+/// The detector list, in the order they must be tried.
+///
+/// Order is load-bearing: the first detector to match wins, so anything that
+/// could be claimed by a general detector has to come first. `EnhancedPlus3`
+/// must precede `AmstradPCW` because HiForm/Ultra208 and friends all present as
+/// format-byte-0 PCW disks; only the extra structural checks separate them.
+/// [`detector_order_is_stable`] guards that invariant.
+fn detectors() -> Vec<(&'static str, Box<dyn FormatDetector>)> {
+    vec![
+        ("Einstein", Box::new(Einstein)),
+        ("Ts2068", Box::new(Ts2068)),
+        ("Mgt", Box::new(Mgt)),
+        ("AmstradCPCSystem", Box::new(AmstradCPCSystem)),
+        ("AmstradCPCData", Box::new(AmstradCPCData)),
+        ("EnhancedPlus3", Box::new(EnhancedPlus3)),
+        ("AmstradPCW", Box::new(AmstradPCW)),
+        ("AssumedPcwSingleSided", Box::new(AssumedPcwSingleSided)),
+        ("InvalidFormat", Box::new(InvalidFormat)),
+        ("DefaultFallback", Box::new(DefaultFallback)),
+    ]
+}
+
 /// Identify the disk specification by trying all format detectors in order
 pub fn identify_specification(image: &DiskImage) -> Option<DiskSpecification> {
-    // Try detectors in order of specificity (most specific first).
-    // EnhancedPlus3 runs before AmstradPCW because HiForm/Ultra208/etc. all
-    // present as format-byte-0 PCW disks; only the extra structural checks
-    // distinguish them.
-    let detectors: Vec<Box<dyn FormatDetector>> = vec![
-        Box::new(Einstein),
-        Box::new(Ts2068),
-        Box::new(Mgt),
-        Box::new(AmstradCPCSystem),
-        Box::new(AmstradCPCData),
-        Box::new(EnhancedPlus3),
-        Box::new(AmstradPCW),
-        Box::new(AssumedPcwSingleSided),
-        Box::new(InvalidFormat),
-        Box::new(DefaultFallback),
-    ];
-
-    for detector in detectors {
+    for (_, detector) in detectors() {
         if let Some(spec) = detector.detect(image) {
             return Some(spec);
         }
@@ -924,6 +929,63 @@ mod tests {
         assert_eq!(spec.side_count(), 2);
         // 2 sides x 40 tracks x 9 x 512 = 368,640 bytes / 1 KB blocks.
         assert_eq!(spec.block_count(), 360);
+    }
+
+    #[test]
+    fn detector_order_is_stable() {
+        // The first matching detector wins, so order defines the result. Any
+        // reordering changes how ambiguous disks are identified.
+        let names: Vec<&str> = detectors().iter().map(|(name, _)| *name).collect();
+        assert_eq!(
+            names,
+            vec![
+                "Einstein",
+                "Ts2068",
+                "Mgt",
+                "AmstradCPCSystem",
+                "AmstradCPCData",
+                "EnhancedPlus3",
+                "AmstradPCW",
+                "AssumedPcwSingleSided",
+                "InvalidFormat",
+                "DefaultFallback",
+            ]
+        );
+
+        // EnhancedPlus3 must be checked before AmstradPCW: a HiForm disk is
+        // otherwise a valid PCW format-byte-0 disk.
+        let plus3 = names.iter().position(|n| *n == "EnhancedPlus3").unwrap();
+        let pcw = names.iter().position(|n| *n == "AmstradPCW").unwrap();
+        assert!(plus3 < pcw, "EnhancedPlus3 must precede AmstradPCW");
+
+        // The catch-all detectors must come last, or they would shadow
+        // everything after them.
+        assert_eq!(names.last(), Some(&"DefaultFallback"));
+        assert_eq!(names[names.len() - 2], "InvalidFormat");
+    }
+
+    #[test]
+    fn hiform_disk_identifies_as_hiform_not_pcw() {
+        // End-to-end guard for the ordering rule above: this image also matches
+        // AmstradPCW, so only the ordering keeps the HiForm label.
+        let spec_data = spec_block(0, 0, 42, 10, 2, 1, 4, 2, 12, 23);
+        let mut t0 = vec![(1, spec_data)];
+        for id in 2..=10 {
+            t0.push((id, vec![]));
+        }
+        let mut reordered = vec![t0[0].clone(), t0[7].clone()];
+        for (idx, s) in t0.into_iter().enumerate() {
+            if idx == 0 || idx == 7 {
+                continue;
+            }
+            reordered.push(s);
+        }
+        let t1: Vec<(u8, Vec<u8>)> = (1..=10).map(|id| (id, vec![])).collect();
+        let image = make_image(1, vec![reordered, t1]);
+
+        let spec = DiskSpecification::identify(&image);
+        assert_eq!(spec.format, "HiForm 203");
+        assert!(!spec.format.contains("PCW"), "HiForm must not be labelled PCW");
     }
 
     // --- Helpers for detector tests ---
