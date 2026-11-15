@@ -259,16 +259,16 @@ fn decode_amstrad_basic_line(data: &[u8]) -> Result<String> {
             }
             
             // Number constants 0-10
-            0x0E => output.push_str("0"),
-            0x0F => output.push_str("1"),
-            0x10 => output.push_str("2"),
-            0x11 => output.push_str("3"),
-            0x12 => output.push_str("4"),
-            0x13 => output.push_str("5"),
-            0x14 => output.push_str("6"),
-            0x15 => output.push_str("7"),
-            0x16 => output.push_str("8"),
-            0x17 => output.push_str("9"),
+            0x0E => output.push('0'),
+            0x0F => output.push('1'),
+            0x10 => output.push('2'),
+            0x11 => output.push('3'),
+            0x12 => output.push('4'),
+            0x13 => output.push('5'),
+            0x14 => output.push('6'),
+            0x15 => output.push('7'),
+            0x16 => output.push('8'),
+            0x17 => output.push('9'),
             0x18 => output.push_str("10"),
             
             // 8-bit integer decimal value
@@ -686,5 +686,35 @@ fn get_token_text_ff_prefix(token: u8) -> Result<&'static str> {
         0x7E => Ok("COPYCHR$"),
         0x7F => Ok("VPOS"),
         _ => Err(DskError::filesystem(&format!("Unknown BASIC token with FF prefix: 0x{:02X}", token))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a one-line tokenised program: length, line number, body, terminator.
+    fn program(body: &[u8]) -> Vec<u8> {
+        let len = (2 + 2 + body.len() + 1) as u16;
+        let mut out = Vec::new();
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&10u16.to_le_bytes());
+        out.extend_from_slice(body);
+        out.push(0x00);
+        out.extend_from_slice(&[0x00, 0x00]);
+        out
+    }
+
+    #[test]
+    fn test_numeric_tokens_decode_as_digits() {
+        // The single-digit constants are emitted one character at a time.
+        for (token, text) in [
+            (0x0Eu8, "0"), (0x0F, "1"), (0x10, "2"), (0x11, "3"), (0x12, "4"),
+            (0x13, "5"), (0x14, "6"), (0x15, "7"), (0x16, "8"), (0x17, "9"),
+            (0x18, "10"),
+        ] {
+            let decoded = decode_amstrad_basic(&program(&[token])).unwrap();
+            assert_eq!(decoded, format!("10 {}\n", text), "token 0x{:02X}", token);
+        }
     }
 }
