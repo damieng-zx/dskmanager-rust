@@ -300,6 +300,7 @@ impl FormatDetector for AmstradCPCSystem {
             spec.source = "First logical sector has ID of 65 (0x41)".to_string();
             spec.format = "Amstrad CPC DD/SS/ST system".to_string();
             spec.reserved_tracks = 2;
+            infer_side_from_image(&mut spec, image);
             spec.update_allocation_size();
             return Some(spec);
         }
@@ -333,6 +334,7 @@ impl FormatDetector for AmstradCPCData {
             spec.source = "First logical sector has ID of 193 (0xC1)".to_string();
             spec.format = "Amstrad CPC DD/SS/ST data".to_string();
             spec.reserved_tracks = 0;
+            infer_side_from_image(&mut spec, image);
             spec.update_allocation_size();
             return Some(spec);
         }
@@ -562,8 +564,27 @@ impl FormatDetector for DefaultFallback {
     }
 }
 
-/// Modular sum of the bytes of `data` (used to discriminate PCW disk variants).
-/// Mirrors `TDSKSector.GetModChecksum` in DskImageManager DskImage.pas:1631.
+/// Derive the side configuration from the image when the spec block says
+/// nothing. Detectors that key off a sector ID alone otherwise report every
+/// double-sided disk as single-sided, halving the visible blocks and pruning
+/// directory entries that point at side 1.
+fn infer_side_from_image(spec: &mut DiskSpecification, image: &DiskImage) {
+    if image.disk_count() != 2 {
+        return;
+    }
+    spec.side = match image.spec().side_mode {
+        crate::format::SideMode::Alternate => DiskSpecSide::DoubleAlternate,
+        crate::format::SideMode::Successive => DiskSpecSide::DoubleSuccessive,
+        crate::format::SideMode::SingleSide => DiskSpecSide::DoubleAlternate,
+    };
+    if let Some(disk) = image.get_disk(0) {
+        if disk.track_count() > 0 {
+            spec.tracks_per_side = disk.track_count() as u8;
+        }
+    }
+}
+
+/// Modular sum of the bytes of `data` (used to discriminate PCW disk variants)./// Mirrors `TDSKSector.GetModChecksum` in DskImageManager DskImage.pas:1631.
 fn mod_checksum(data: &[u8], modulus: u32) -> u32 {
     data.iter().fold(0u32, |acc, &b| (acc + b as u32) % modulus)
 }
@@ -876,6 +897,22 @@ mod tests {
             format!("{}", DiskSpecSide::DoubleAlternate),
             "Double (Alternate)"
         );
+    }
+
+    #[test]
+    fn test_detect_double_sided_cpc_data() {
+        // A 360K CPC data disk has two sides. Detection picked the side mode
+        // from the sector ID alone, so the second side was ignored: only 180 of
+        // the 355 blocks were visible and side-1 directory entries were pruned.
+        let image = crate::image::DiskImage::builder()
+            .spec(crate::format::FormatSpec::amstrad_data_ds())
+            .build()
+            .unwrap();
+        let spec = DiskSpecification::identify(&image);
+        assert_eq!(spec.side, DiskSpecSide::DoubleAlternate);
+        assert_eq!(spec.side_count(), 2);
+        // 2 sides x 40 tracks x 9 x 512 = 368,640 bytes / 1 KB blocks.
+        assert_eq!(spec.block_count(), 360);
     }
 
     // --- Helpers for detector tests ---
