@@ -231,6 +231,7 @@ pub struct CpmFileSystem<'a> {
 impl<'a> CpmFileSystem<'a> {
     /// Create a new CP/M filesystem from an image using a detected specification
     pub fn new(image: &'a DiskImage, spec: DiskSpecification) -> Result<Self> {
+        Self::validate_geometry(&spec)?;
         let directory_entries = Self::read_directory(image, &spec)?;
 
         Ok(Self {
@@ -238,6 +239,21 @@ impl<'a> CpmFileSystem<'a> {
             spec,
             directory_entries,
         })
+    }
+
+    /// Reject specifications that would make block maths degenerate.
+    ///
+    /// A spec block read from the disk can declare a sector-size code outside
+    /// the FDC range, which leaves `sector_size` at zero. Every later block
+    /// calculation divides by that value, so refuse the mount instead.
+    fn validate_geometry(spec: &DiskSpecification) -> Result<()> {
+        if spec.sector_size == 0 {
+            return Err(DskError::filesystem("Invalid sector size in disk specification"));
+        }
+        if spec.block_size() < spec.sector_size as usize || spec.block_size() % spec.sector_size as usize != 0 {
+            return Err(DskError::filesystem("Block size is not a multiple of the sector size"));
+        }
+        Ok(())
     }
 
     /// Read the directory entries from the disk
@@ -754,6 +770,25 @@ impl CpmFileSystem<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_invalid_geometry_is_rejected_at_mount() {
+        // A PCW/+3 spec block can declare an invalid sector-size code, which
+        // leaves sector_size == 0. Reading a file used to divide by zero.
+        let image = DiskImage::builder()
+            .num_tracks(2)
+            .sectors_per_track(2)
+            .build()
+            .unwrap();
+        let mut spec = DiskSpecification::new();
+        spec.sector_size = 0;
+        spec.tracks_per_side = 2;
+        spec.sectors_per_track = 2;
+        spec.reserved_tracks = 0;
+        spec.directory_blocks = 1;
+
+        assert!(CpmFileSystem::new(&image, spec).is_err());
+    }
 
     #[test]
     fn test_parse_dir_entry() {
