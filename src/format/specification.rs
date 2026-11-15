@@ -694,19 +694,20 @@ impl DiskSpecification {
     }
 
     /// Calculate the block size in bytes
+    ///
+    /// A shift large enough to overflow yields 0, which callers already treat as
+    /// "no blocks" rather than panicking.
     pub fn block_size(&self) -> usize {
-        128 << self.block_shift
+        128usize.checked_shl(self.block_shift as u32).unwrap_or(0)
     }
 
     /// Calculate the number of blocks on the disk
     pub fn block_count(&self) -> u16 {
         let usable = self.usable_capacity();
-        let block_size = self.block_size();
-        if block_size == 0 {
-            0
-        } else {
-            (usable / block_size) as u16
-        }
+        usable
+            .checked_div(self.block_size())
+            .map(|blocks| blocks as u16)
+            .unwrap_or(0)
     }
 
     /// Calculate the usable capacity in bytes (excluding reserved tracks)
@@ -864,6 +865,16 @@ mod tests {
         let spec = DiskSpecification::new();
         // 179712 bytes / 1024 bytes per block = 175 blocks
         assert_eq!(spec.block_count(), 175);
+    }
+
+    #[test]
+    fn test_block_count_with_zero_block_size() {
+        // A spec block can push block_shift high enough that the shift
+        // overflows to zero; block_count must report 0 rather than divide.
+        let mut spec = DiskSpecification::new();
+        spec.block_shift = 200;
+        assert_eq!(spec.block_size(), 0);
+        assert_eq!(spec.block_count(), 0);
     }
 
     #[test]
