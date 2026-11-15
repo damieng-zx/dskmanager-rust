@@ -335,6 +335,15 @@ fn write_track(file: &mut File, track: &crate::image::Track, track_size: usize) 
         sib[4] = sector.fdc_status1.0;
         sib[5] = sector.fdc_status2.0;
 
+        // Size codes 7 and 8 cannot be represented in a DSK: nothing is stored.
+        // Refuse rather than writing a zero-length sector and losing the data.
+        if fdc_size_to_stored_bytes(sector.id.size_code) == 0 && !sector.data().is_empty() {
+            return Err(crate::error::DskError::UnsupportedFormat(format!(
+                "Sector {} on track {} side {} uses FDC size code {}, which stores no data in a DSK image",
+                sector.id.sector, track.track_number, track.side_number, sector.id.size_code
+            )));
+        }
+
         // The stored length and the declared data length must agree. Mutating
         // a sector through data_mut() can leave data_length stale, and writing
         // it anyway silently dropped or misaligned data.
@@ -468,6 +477,41 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_oversized_sector_is_reported_not_silently_dropped() {
+        // Size codes 7 and 8 have no representation in the DSK format: the
+        // stored_size table maps them to 0. Saving used to succeed and reload a
+        // zero-length sector, losing 16 KB with no diagnostic.
+        use crate::fdc::FdcStatus1;
+        use crate::image::{SectorId, Track};
+
+        let mut image = DiskImage::builder()
+            .format(DiskImageFormat::ExtendedDSK)
+            .num_tracks(1)
+            .sectors_per_track(0)
+            .build()
+            .unwrap();
+        {
+            let track = image.get_disk_mut(0).unwrap().get_track_mut(0).unwrap();
+            let id = SectorId::new(0, 0, 0xC1, 7); // 16384 bytes
+            let sector = crate::image::Sector::with_status(
+                id,
+                FdcStatus1::new(0),
+                crate::fdc::FdcStatus2::new(0),
+                vec![0x5A; 16384],
+            );
+            track.add_sector(sector);
+            let _: &mut Track = track;
+        }
+
+        let path = std::env::temp_dir().join(format!("dskmgr_huge_{}.dsk", std::process::id()));
+        let saved = image.save(&path);
+        if path.exists() {
+            std::fs::remove_file(&path).ok();
+        }
+        assert!(saved.is_err(), "a 16 KB sector cannot be stored in a DSK");
     }
 
     #[test]
